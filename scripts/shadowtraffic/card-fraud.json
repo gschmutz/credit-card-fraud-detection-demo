@@ -392,8 +392,17 @@
             {
                 "generators": [
                     "genMerchants",
-                    "genMerchantCategories"
-                ]
+                    "genMerchantCategories",
+                    "genCardHolders"
+                ],
+                "overrides": {
+                    "genCardHolders": {
+                        "localConfigs": {
+                            "maxEvents": 300,
+                            "throttleMs": 0
+                        }
+                    }
+                }
             },
             {
                 "generators": [
