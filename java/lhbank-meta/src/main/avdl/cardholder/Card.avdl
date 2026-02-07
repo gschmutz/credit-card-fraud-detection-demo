@@ -1,0 +1,9 @@
+@namespace("com.lhbank.cardholder.avro")
+protocol CardProtocol {
+
+	record Card {
+		string number;
+		string type;
+		string expiryDate;
+	}
+}

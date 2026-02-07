@@ -1,0 +1,8 @@
+@namespace("com.lhbank.card.transaction.avro")
+protocol TransactionProtocol {
+
+	record Transaction {
+		long id;
+
+	}
+}

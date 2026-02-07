@@ -1,0 +1,22 @@
+@namespace("com.lhbank.cardholder.avro")
+protocol CardHolderProtocol {
+
+	import idl "Address.avdl";
+	import idl "Card.avdl";
+
+	record CardHolder {
+		string id;
+		union { null, string } firstName = null;
+		string lastName;
+		string emailAddress;
+		string phoneNumber;
+		union { null, string } preferredContact = null;
+		union { null, string } segment = null;
+		union { null, Card } card = null;
+		long avgTransactionAmount;
+		
+		array<Address> addresses;
+		union { null, array<string> } usualCountries = null;
+		timestamp_ms onboardedDate;
+	}
+}

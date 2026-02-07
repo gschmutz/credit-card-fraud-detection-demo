@@ -1,0 +1,24 @@
+POST localhost:8082/api/cardHolders
+Content-Type: application/json
+
+{
+   "id":"999998",
+   "firstName":"Peter",
+   "lastName": "Muster",
+   "segment": "bronze",
+   "usualCountries": ["CH", "DE"],
+   "addresses": [
+     {
+       "street":"Dorfstrasse 1",
+       "zipCode":"3750",
+       "city":"Dorfhausen",
+       "state":"BE"
+     }
+   ],
+  "card" : {
+    "cardNumber": "1234567890123456",
+    "expiryDate": "12/25",
+    "type": "visa"
+  },
+  "avgTransactionAmount": 100
+}

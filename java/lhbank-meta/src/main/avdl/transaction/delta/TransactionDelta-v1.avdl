@@ -1,0 +1,8 @@
+@namespace("com.lhbank.card.transaction.avro")
+protocol TransactionDeltaProtocol {
+	import idl "../Transaction.avdl";
+
+	record TransactionDelta {
+		Transaction transaction;
+	}
+}

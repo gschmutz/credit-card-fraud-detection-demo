@@ -1,0 +1,8 @@
+@namespace("com.lhbank.cardholder.avro")
+protocol CardHolderStateProtocol {
+	import idl "../CardHolder.avdl";
+
+	record CardHolderState {
+		CardHolder cardHolder;
+	}
+}
