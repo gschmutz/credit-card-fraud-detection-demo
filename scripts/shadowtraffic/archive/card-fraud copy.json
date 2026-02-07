@@ -1,0 +1,477 @@
+{
+    "generators": [
+        {
+            "name": "customers",
+            "connection": "kafka",
+            "vars": {
+                "customerId": {
+                    "_gen": "uuid"
+                }
+            },
+            "topic": "pub.crm.customer.state.v1",
+            "key": {
+                "_gen": "var", "var": "customerId"
+            },
+            "value": {
+                "customer": {
+                    "id": {
+                        "_gen": "var", "var": "customerId"
+                    },
+                    "firstName": {
+                        "_gen": "string",
+                        "expr": "#{Name.firstName}"
+                    },
+                    "lastName": {
+                        "_gen": "string",
+                        "expr": "#{Name.lastName}"
+                    },
+                    "avgTransactionAmount": {
+                        "_gen": "weightedOneOf",
+                        "choices": [
+                            {
+                                "weight": 19,
+                                "value": {
+                                    "_gen": "uniformDistribution",
+                                    "bounds": [1, 1000],
+                                    "decimals": 0
+                                }
+                            },
+                            {
+                                "weight": 1,
+                                "value": {
+                                    "_gen": "normalDistribution",
+                                    "mean": 3000,
+                                    "sd": 500,
+                                    "decimals": 0
+                                }
+                            }
+                        ]
+                    },
+                    "customerTier": {
+                        "_gen": "oneOf",
+                        "choices": [
+                            "bronze",
+                            "silver",
+                            "gold",
+                            "platinum"
+                        ]
+                    },
+                    "addresses" : {
+                        "_gen" : "repeatedly",
+                        "n" : {
+                        "_gen" : "uniformDistribution",
+                        "bounds" : [
+                            1,
+                            5
+                        ],
+                        "decimals" : 0
+                        },
+                        "target" : {
+                        "street" : {
+                            "_gen" : "string",
+                            "expr" : "#{Address.streetName}"
+                        },
+                        "zipCode" : {
+                            "_gen" : "string",
+                            "expr" : "#{Address.zipCode}"
+                        },
+                        "city" : {
+                            "_gen" : "string",
+                            "expr" : "#{Address.city}"
+                        },
+                        "state" : {
+                            "_gen" : "string",
+                            "expr" : "#{Team.state}"
+                        }
+                        }
+                    },                    
+                    "usualCountries": {
+                        "_gen": "repeatedly",
+                        "n": 5, 
+                        "target":{
+                            "_gen": "oneOf",
+                            "choices": [
+                                "DE",
+                                "CH",
+                                "GB",
+                                "IE",
+                                "FR",
+                                "BE",
+                                "NL",
+                                "IT",
+                                "GI",
+                                "MT",
+                                "AT",
+                                "ES",
+                                "PT",
+                                "LI",
+                                "DK",
+                                "SE",
+                                "NO",
+                                "FI"
+                            ]
+                        },
+                        "sample": {
+                            "rate": 0.5
+                        }
+                    },
+                    "onboardedDate": {
+                        "_gen": "now"
+                    }
+                }
+            },
+            "localConfigs": {
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        2000,
+                        10000
+                    ]
+                },
+                "avroSchemaHint" : {
+                    "value" : {
+                        "type" : "record",
+                        "name" : "CustomerState",
+                        "namespace" : "com.lhbank.card.customer.avro",
+                        "fields" : [
+                        {
+                            "name" : "customer",
+                            "type" : {
+                            "type" : "record",
+                            "name" : "Customer",
+                            "fields" : [
+                                {
+                                "name" : "id",
+                                "type" : "string"
+                                },
+                                {
+                                "name" : "firstName",
+                                "type" : "string"
+                                },
+                                {
+                                "name" : "lastName",
+                                "type" : "string"
+                                },
+                                {
+                                "name" : "customerTier",
+                                "type" : "string"
+                                },
+                                {
+                                "name" : "avgTransactionAmount",
+                                "type" : "long"
+                                },
+                                {
+                                "name" : "addresses",
+                                "type" : {
+                                    "type" : "array",
+                                    "items" : {
+                                    "type" : "record",
+                                    "name" : "Address",
+                                    "fields" : [
+                                        {
+                                        "name" : "street",
+                                        "type" : "string"
+                                        },
+                                        {
+                                        "name" : "zipCode",
+                                        "type" : "string"
+                                        },
+                                        {
+                                        "name" : "city",
+                                        "type" : "string"
+                                        },
+                                        {
+                                        "name" : "state",
+                                        "type" : "string"
+                                        }
+                                    ]
+                                    }
+                                }
+                                },
+                                {
+                                "name" : "usualCountries",
+                                "type" : {
+                                    "type" : "array",
+                                    "items" : "string"
+                                }
+                                },
+                                {
+                                "name" : "activationDate",
+                                "type" : {
+                                    "type" : "long",
+                                    "logicalType" : "timestamp-millis"
+                                }
+                                }
+                            ]
+                            }
+                        }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "name": "cards",
+            "connection": "pg",
+            "table": "cards",
+            "row": {
+                "card_id": {
+                    "_gen": "uuid"
+                },
+                "card_number": {
+                    "_gen": "string", "expr": "#{Business.creditCardNumber}"
+                },
+                "card_type": {
+                    "_gen": "string", "expr": "#{Business.creditCardType}"
+                },
+                "card_expiry_date": {
+                    "_gen": "string", "expr": "#{Business.creditCardExpiry}"
+                },
+                "customer_id": {
+                    "_gen": "lookup",
+                    "connection": "kafka",
+                    "topic": "pub.crm.customer.state.v1",
+                    "path": [
+                        "key"
+                    ]
+                },
+                "daily_limit": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        100,
+                        5000
+                    ]
+                },
+                "monthly_limit": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        1000,
+                        20000
+                    ]
+                },
+                "created_at": {
+                    "_gen": "now",
+                    "serialize": {
+                        "type": "postgresTimestamp"
+                    },
+                    "pgHint": "TIMESTAMP"
+                },           
+                "modified_at": {
+                    "_gen": "now",
+                    "serialize": {
+                        "type": "postgresTimestamp"
+                    },
+                    "pgHint": "TIMESTAMP"
+                }               
+            },
+            "localConfigs": {
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        1000,
+                        5000
+                    ]
+                }
+            }
+        },
+        {
+            "name": "merchants",
+            "connection": "kafka",
+            "topic": "merchants.state.v1",
+            "vars": { 
+                "merchantId": {
+                    "_gen": "sequentialString",
+                    "expr": "merchant-~d"
+                }
+            },
+            "key": {
+                "merchantId": {
+                    "_gen": "var", "var": "merchantId"
+
+                }
+            },
+            "value": {
+                "merchantId": {
+                    "_gen": "var", "var": "merchantId"
+                },
+                "name": {
+                    "_gen": "string",
+                    "expr": "#{Company.name}"
+                },
+                "location": {
+                    "_gen": "string",
+                    "expr": "#{Address.latitude}, #{Address.longitude}"
+                }
+            },
+            "localConfigs": {
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [0, 10]
+                },
+                "maxEvents": 200
+            }
+        },       
+        {
+            "name": "cardTransactions",
+            "connection": "kafka",            
+            "topic": "card-transactions.delta.v1",
+            "vars": {
+                "cardNumber": {
+                    "_gen": "lookup",
+                    "connection": "pg",
+                    "table": "cards",
+                    "path": [
+                        "row",
+                        "card_number"
+                    ]
+                }
+            },
+            "key": {
+                "_gen": "var", "var": "cardNumber"
+            },
+            "value": {
+                "transactionId": {
+                    "_gen": "uuid"
+                },
+                "cardNumber": {
+                    "_gen": "var", "var": "cardNumber"
+                },
+                "merchantId": {
+                    "_gen": "lookup",
+                    "connection": "kafka",
+                    "topic": "merchants.state.v1",
+                    "path": [
+                        "value","merchantId"
+                    ]
+                },
+                "amount": {
+                    "_gen": "weightedOneOf",
+                    "choices": [
+                        {
+                            "weight": 19,
+                            "value": {
+                                "_gen": "uniformDistribution",
+                                "bounds": [1, 300]
+                            }
+                        },
+                        {
+                            "weight": 1,
+                            "value": {
+                                "_gen": "normalDistribution",
+                                "mean": 3000,
+                                "sd": 500
+                            }
+                        }
+                    ]
+                },
+                "currency": {
+                    "_gen": "string",
+                    "expr": "#{Country.currencyCode}"
+                },
+                "country": {
+                    "_gen": "oneOf",
+                    "choices": [
+                        "DE",
+                        "CH",
+                        "GB",
+                        "IE",
+                        "FR",
+                        "BE",
+                        "NL",
+                        "IT",
+                        "GI",
+                        "MT",
+                        "AT",
+                        "ES",
+                        "PT",
+                        "LI",
+                        "DK",
+                        "SE",
+                        "NO",
+                        "FI"
+                    ]      
+                },                
+                "timestamp": {
+                    "_gen": "now"
+                }
+            },
+            "localConfigs": {
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        500,
+                        2000
+                    ]
+                }
+            }   
+        }
+    ],
+    "schedule": {
+        "stages": [
+            {
+                "generators": [
+                    "merchants"
+                ]
+            },
+            {
+                "generators": [
+                    "customers",
+                    "cards",
+                    "cardTransactions"
+                ]
+            }
+        ]
+    },    
+    "connections": {
+        "kafka": {
+            "kind": "kafka",
+            "topicPolicy": {
+                "policy": "create",
+                "partitions": 2,
+                "replicationFactor": 3,
+                "topicConfigs": {
+                    "retention.ms": "86400000"
+                }
+            },            
+            "producerConfigs": {
+                "bootstrap.servers": {
+                    "_gen": "env",
+                    "var": "KAFKA_BOOTSTRAP_SERVERS"
+                },
+                "schema.registry.url":  {
+                    "_gen": "env",
+                    "var": "KAFKA_SCHEMA_REGISTRY_URL"
+                },
+                "key.serializer": "io.confluent.kafka.serializers.KafkaAvroSerializer",
+                "value.serializer": "io.confluent.kafka.serializers.KafkaAvroSerializer"
+            }
+        },
+        "pg": {
+            "kind": "postgres",
+            "tablePolicy": "dropAndCreate",
+            "connectionConfigs": {
+                "host": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_HOST"
+                },
+                "port": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_PORT",
+                    "as": "integer"
+                },
+                "db":{
+                    "_gen": "env",
+                    "var": "POSTGRESQL_DATABASE"
+                },
+                "username": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_USER"
+                },
+                "password": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_PASSWORD"
+                }
+            }
+        }
+    }
+}

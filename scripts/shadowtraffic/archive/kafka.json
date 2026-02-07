@@ -1,0 +1,82 @@
+{
+    "generators": [
+        {
+            "topic": "cdc-events",
+            "fork": {
+                "key": { "_gen": "uuid" },
+                "stagger": { "ms": 1000 },
+                "maxForks": 10
+            },
+            "key": {
+                "_gen": "var", "var": "forkKey"
+            },
+            "value": {},
+            "stateMachine": {
+                "_gen": "stateMachine",
+                "initial": "insert",
+                "merge": { "previous": true },
+                "transitions": {
+                    "insert": {
+                        "_gen": "weightedOneOf",
+                        "choices": [
+                            { "weight": 8, "value": "updateName" },
+                            { "weight": 4, "value": "updateEmail" },
+                            { "weight": 1, "value": "delete" }
+                        ]
+                    },
+                    "update": {
+                        "_gen": "oneOf",
+                        "choices": [
+                            "update", "delete"
+                        ]
+                    },
+                    "delete": null
+                },
+                "states": {
+                    "insert": {
+                        "value": {
+                            "id": { "_gen": "var", "var": "forkKey" },
+                            "firstName": { "_gen": "string", "expr": "#{Name.firstName}" },
+                            "lastName": { "_gen": "string", "expr": "#{Name.lastName}" },
+                            "email": { "_gen": "string", "expr": "#{Internet.emailAddress}" }
+                        }
+                    },
+                    "updateName": {
+                        "value": {
+                            "update": true,
+                            "id": { "_gen": "var", "var": "forkKey" },
+                            "firstName": { "_gen": "previousEvent", "path": ["value","firstName"]  },
+                            "lastName": { "_gen": "string", "expr": "#{Name.lastName}"  },
+                            "email": { "_gen": "previousEvent", "path": ["value","email"]  }
+                        }
+                    },
+                    "updateEmail": {
+                        "value": {
+                            "update": true,
+                            "id": { "_gen": "var", "var": "forkKey" },
+                            "firstName": { "_gen": "previousEvent", "path": ["value","firstName"]  },
+                            "lastName": { "_gen": "previousEvent", "path": ["value","lastName"]  },
+                            "email": { "_gen": "string", "expr": "#{Internet.emailAddress}" }
+                        }
+                    },
+                    "delete": {
+                        "value": null
+                    }
+                }
+            },
+            "localConfigs": {
+                "throttleMs": 250
+            }
+        }
+    ],
+    "connections": {
+        "kafka": {
+            "kind": "kafka",
+            "producerConfigs": {
+                "bootstrap.servers": "kafka-1:19092",
+                "key.serializer": "io.shadowtraffic.kafka.serdes.JsonSerializer",
+                "value.serializer": "io.shadowtraffic.kafka.serdes.JsonSerializer"
+            }
+        }
+    }
+}

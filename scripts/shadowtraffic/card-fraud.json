@@ -1,0 +1,461 @@
+{
+    "generators": [
+        {
+            "name": "genCardHolders",
+            "connection": "cardHolderWebhook",
+            "vars": {
+                "id": {
+                    "_gen": "uuid"
+                }
+            },
+            "url": "http://lhbank-cardholder-app:8082/api/cardHolders",
+            "method": "POST",
+            "data": {
+                "id": {
+                    "_gen": "var",
+                    "var": "id"
+                },
+                "firstName": {
+                    "_gen": "string",
+                    "expr": "#{Name.firstName}"
+                },
+                "lastName": {
+                    "_gen": "string",
+                    "expr": "#{Name.lastName}"
+                },
+                "emailAddress": {
+                    "_gen": "string",
+                    "expr": "#{Internet.emailAddress}"
+                },                
+                "phoneNumber": {
+                    "_gen": "string",
+                    "expr": "#{PhoneNumber.cellPhoneInternational}"
+                },               
+                "preferredContact": {
+                    "_gen": "oneOf",
+                    "choices": [
+                        "email",
+                        "phone"
+                    ]
+                },               
+                "avgTransactionAmount": {
+                    "_gen": "weightedOneOf",
+                    "choices": [
+                        {
+                            "weight": 19,
+                            "value": {
+                                "_gen": "uniformDistribution",
+                                "bounds": [
+                                    1,
+                                    1000
+                                ],
+                                "decimals": 0
+                            }
+                        },
+                        {
+                            "weight": 1,
+                            "value": {
+                                "_gen": "normalDistribution",
+                                "mean": 3000,
+                                "sd": 500,
+                                "decimals": 0
+                            }
+                        }
+                    ]
+                },
+                "segment": {
+                    "_gen": "oneOf",
+                    "choices": [
+                        "bronze",
+                        "silver",
+                        "gold",
+                        "platinum"
+                    ]
+                },
+                "addresses": {
+                    "_gen": "repeatedly",
+                    "n": {
+                        "_gen": "uniformDistribution",
+                        "bounds": [
+                            1,
+                            5
+                        ],
+                        "decimals": 0
+                    },
+                    "target": {
+                        "street": {
+                            "_gen": "string",
+                            "expr": "#{Address.streetName}"
+                        },
+                        "zipCode": {
+                            "_gen": "string",
+                            "expr": "#{Address.zipCode}"
+                        },
+                        "city": {
+                            "_gen": "string",
+                            "expr": "#{Address.city}"
+                        },
+                        "state": {
+                            "_gen": "string",
+                            "expr": "#{Team.state}"
+                        }
+                    }
+                },
+                "card": {
+                    "number": {
+                        "_gen": "string",
+                        "expr": "#{Business.creditCardNumber}"
+                    },
+                    "type": {
+                        "_gen": "string",
+                        "expr": "#{Business.creditCardType}"
+                    },
+                    "expiryDate": {
+                        "_gen": "string",
+                        "expr": "#{Business.creditCardExpiry}"
+                    }
+                },
+                "usualCountries": {
+                    "_gen": "repeatedly",
+                    "n": 5,
+                    "target": {
+                        "_gen": "oneOf",
+                        "choices": [
+                            "DE",
+                            "CH",
+                            "GB",
+                            "IE",
+                            "FR",
+                            "BE",
+                            "NL",
+                            "IT",
+                            "GI",
+                            "MT",
+                            "AT",
+                            "ES",
+                            "PT",
+                            "LI",
+                            "DK",
+                            "SE",
+                            "NO",
+                            "FI"
+                        ]
+                    },
+                    "sample": {
+                        "rate": 0.5
+                    }
+                },
+                "onboardedDate": {
+                    "_gen": "now"
+                }
+            },
+            "localConfigs": {
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        40000,
+                        120000
+                    ]
+                }
+            }
+        },
+        {
+            "name": "genBlacklistedMerchants",
+            "connection": "pg",
+            "table": "blacklisted_merchants",
+            "row": {
+                "merchant_id": {
+                    "_gen": "lookup",
+                    "connection": "kafka",
+                    "topic": "pub.merchant.merchant.state.v1",
+                    "path": [
+                        "key"
+                    ]
+                },
+
+                "created_at": {
+                    "_gen": "now",
+                    "serialize": {
+                        "type": "postgresTimestamp"
+                    },
+                    "pgHint": "TIMESTAMP"
+                },
+                "modified_at": {
+                    "_gen": "now",
+                    "serialize": {
+                        "type": "postgresTimestamp"
+                    },
+                    "pgHint": "TIMESTAMP"
+                }
+            },
+            "localConfigs": {
+                "maxEvents": 1,
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        1000,
+                        5000
+                    ]
+                }
+            }
+        },
+        {
+            "name": "genMerchants",
+            "connection": "kafka",
+            "topic": "pub.merchant.merchant.state.v1",
+            "vars": {
+                "merchantId": {
+                    "_gen": "sequentialString",
+                    "expr": "merchant-~d"
+                }
+            },
+            "key": {
+                "_gen": "var",
+                "var": "merchantId"
+            },
+            "value": {
+                "merchantId": {
+                    "_gen": "var",
+                    "var": "merchantId"
+                },
+                "name": {
+                    "_gen": "string",
+                    "expr": "#{Company.name}"
+                }
+            },
+            "localConfigs": {
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        0,
+                        10
+                    ]
+                },
+                "maxEvents": 200
+            }
+        },
+        {
+            "name": "genMerchantCategories",
+            "connection": "kafka",
+            "topic": "pub.merchant.category.state.v1",
+            "vars": {
+                "categoryId": {
+                    "_gen": "sequentialInteger"
+                }
+            },
+            "key": {
+                "_gen": "var",
+                "var": "categoryId"
+            },
+            "value": {
+                "categoryId": {
+                    "_gen": "var",
+                    "var": "categoryId"
+                },
+                "name": {
+                    "_gen": "string",
+                    "expr": "#{Commerce.department}"
+                }
+            },
+            "localConfigs": {
+                "maxEvents": 300
+            }
+        },
+        {
+            "name": "genCardTransactions",
+            "connection": "kafka",
+            "topic": "pub.payment.transaction.delta.v1",
+            "vars": {
+                "cardNumber": {
+                    "_gen": "lookup",
+                    "name": "genCardHolders",
+                    "path": [
+                        "data","card", "number"
+                    ]
+                },
+                "merchantId": {
+                    "_gen": "lookup",
+                    "connection": "kafka",
+                    "topic": "pub.merchant.merchant.state.v1",
+                    "path": [
+                        "value",
+                        "merchantId"
+                    ]
+                },
+                "merchantName": {
+                    "_gen": "lookup",
+                    "connection": "kafka",
+                    "topic": "pub.merchant.merchant.state.v1",
+                    "path": [
+                        "value",
+                        "name"
+                    ]
+                },
+                "merchantCategoryId": {
+                    "_gen": "lookup",
+                    "connection": "kafka",
+                    "topic": "pub.merchant.category.state.v1",
+                    "path": [
+                        "value",
+                        "categoryId"
+                    ]
+                },
+                "countryCode": {
+                    "_gen": "string",
+                    "expr": "#{Address.countryCode}"
+                },
+                "city": {
+                    "_gen": "string",
+                    "expr": "#{Address.city}"
+                }
+            },
+            "key": {
+                "_gen": "var",
+                "var": "cardNumber"
+            },
+            "value": {
+                "transactionId": {
+                    "_gen": "uuid"
+                },
+                "cardNumber": {
+                    "_gen": "var",
+                    "var": "cardNumber"
+                },
+                "merchantId": {
+                    "_gen": "var",
+                    "var": "merchantId"
+                },
+                "merchantCategoryId": {
+                    "_gen": "var",
+                    "var": "merchantCategoryId"
+                },
+                "amount": {
+                    "_gen": "weightedOneOf",
+                    "choices": [
+                        {
+                            "weight": 19,
+                            "value": {
+                                "_gen": "uniformDistribution",
+                                "bounds": [
+                                    1,
+                                    300
+                                ]
+                            }
+                        },
+                        {
+                            "weight": 1,
+                            "value": {
+                                "_gen": "normalDistribution",
+                                "mean": 3000,
+                                "sd": 500
+                            }
+                        }
+                    ]
+                },
+                "currency": {
+                    "_gen": "string",
+                    "expr": "#{Country.currencyCode}"
+                },
+                "channel": {
+                    "_gen": "oneOf",
+                    "choices": [
+                        "POS",
+                        "e-commerce",
+                        "ATM"
+                    ]
+                },
+                "country": {
+                    "_gen": "var",
+                    "var": "countryCode"
+                },
+                "city": {
+                    "_gen": "var",
+                    "var": "city"
+                },
+                "timestamp": {
+                    "_gen": "now"
+                }
+            },
+            "localConfigs": {
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        50,
+                        500
+                    ]
+                }
+            }
+        }
+    ],
+    "schedule": {
+        "stages": [
+            {
+                "generators": [
+                    "genMerchants",
+                    "genMerchantCategories"
+                ]
+            },
+            {
+                "generators": [
+                    "genCardHolders",
+                    "genCardTransactions"
+                ]
+            }
+        ]
+    },
+    "connections": {
+        "kafka": {
+            "kind": "kafka",
+            "topicPolicy": {
+                "policy": "create",
+                "partitions": 2,
+                "replicationFactor": 3,
+                "topicConfigs": {
+                    "retention.ms": "86400000"
+                }
+            },
+            "producerConfigs": {
+                "bootstrap.servers": {
+                    "_gen": "env",
+                    "var": "KAFKA_BOOTSTRAP_SERVERS"
+                },
+                "schema.registry.url": {
+                    "_gen": "env",
+                    "var": "KAFKA_SCHEMA_REGISTRY_URL"
+                },
+                "key.serializer": "io.confluent.kafka.serializers.KafkaAvroSerializer",
+                "value.serializer": "io.confluent.kafka.serializers.KafkaAvroSerializer"
+            }
+        },
+        "pg": {
+            "kind": "postgres",
+            "tablePolicy": "dropAndCreate",
+            "connectionConfigs": {
+                "host": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_HOST"
+                },
+                "port": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_PORT",
+                    "as": "integer"
+                },
+                "db": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_DATABASE"
+                },
+                "username": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_USER"
+                },
+                "password": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_PASSWORD"
+                }
+            }
+        },
+        "cardHolderWebhook": {
+            "kind": "webhook"
+        }
+    }
+}

@@ -1,0 +1,119 @@
+{
+    "generators": [
+        {
+            "connection": "dev-pg",
+            "table": "customers",
+            "row": {
+                "username": {
+                    "_gen": "string",
+                    "expr": "#{Name.username}"
+                },
+                "address": {
+                    "_gen": "string",
+                    "expr": "#{Address.fullAddress}"
+                }
+            },
+            "localConfigs": {
+                "maxEvents": 4
+            }          
+        },
+        {
+            "connection": "dev-kafka",
+            "topic": "purchases",
+            "vars": {
+                "purchaseId": {
+                    "_gen": "uuid"
+                }
+            },
+            "key": {
+                "_gen": "var", "var": "purchaseId"
+            },
+            "value": {
+                "purchaseId": {
+                    "_gen": "var", "var": "purchaseId"
+                },
+                "customerId": {
+                    "_gen": "lookup",
+                    "connection": "dev-pg",
+                    "table": "customers",
+                    "path": [
+                        "row",
+                        "username"
+                    ]
+                },
+                "product": {
+                    "_gen": "string",
+                    "expr": "#{Commerce.productName}"
+                },
+                "creditCard": {
+                    "_gen": "string",
+                    "expr": "#{Finance.creditCard}"
+                }
+            },
+            "localConfigs": {
+                "throttleMs": 1000
+            }
+
+        },
+        {
+            "connection": "dev-kafka",
+            "topic": "supportTickets",
+            "key": {
+                "_gen": "lookup",
+                "topic": "purchases",
+                "path": [
+                    "key"
+                ]
+            },
+            "value": {
+                "timestamp": {
+                    "_gen": "now"
+                }
+            },
+            "localConfigs": {
+                "throttleMs": 5000
+            }
+        }
+    ],
+    "connections": {
+        "dev-kafka": {
+            "kind": "kafka",
+            "producerConfigs": {
+                "bootstrap.servers": {
+                    "_gen": "env",
+                    "var": "KAFKA_BOOTSTRAP_SERVERS"
+                },
+                "key.serializer": "io.shadowtraffic.kafka.serdes.JsonSerializer",
+                "value.serializer": "io.shadowtraffic.kafka.serdes.JsonSerializer"
+            }
+        },
+        "dev-pg": {
+            "kind": "postgres",
+            "tablePolicy": "dropAndCreate",
+            "connectionConfigs": {
+                "host": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_HOST"
+                },
+                "port": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_PORT",
+                    "as": "integer"
+                },
+                "db":{
+                    "_gen": "env",
+                    "var": "POSTGRESQL_DATABASE"
+                },
+                "username": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_USER"
+                },
+                "password": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_PASSWORD"
+                }
+            }
+        }
+
+    }
+}

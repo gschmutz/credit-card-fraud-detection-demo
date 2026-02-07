@@ -1,0 +1,94 @@
+{
+    "generators": [
+        {
+            "table": "sandbox",
+            "fork": {
+                "key": {
+                    "_gen": "uuid"
+                }
+            },
+            "row": {
+                "id": {
+                    "_gen": "var",
+                    "var": "forkKey"
+                }
+            },
+            "stateMachine": {
+                "_gen": "stateMachine",
+                "initial": "insertIt",
+                "transitions": {
+                    "insertIt": "updateIt",
+                    "updateIt": "deleteIt"
+                },
+                "states": {
+                    "insertIt": {
+                        "row": {
+                            "value": {
+                                "_gen": "normalDistribution",
+                                "mean": 50,
+                                "sd": 15
+                            }
+                        }
+                    },
+                    "updateIt": {
+                        "op": "update",
+                        "where": {
+                            "id": {
+                                "_gen": "var",
+                                "var": "forkKey"
+                            }
+                        },
+                        "row": {
+                            "value": {
+                                "_gen": "oneOf",
+                                "choices": [
+                                    1,
+                                    5,
+                                    10
+                                ]
+                            }
+                        }
+                    },
+                    "deleteIt": {
+                        "op": "delete",
+                        "where": {
+                            "id": {
+                                "_gen": "var",
+                                "var": "forkKey"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "connections": {
+        "dev-pg": {
+            "kind": "postgres",
+            "tablePolicy": "dropAndCreate",
+            "connectionConfigs": {
+                "host": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_HOST"
+                },
+                "port": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_PORT",
+                    "as": "integer"
+                },
+                "db":{
+                    "_gen": "env",
+                    "var": "POSTGRESQL_DATABASE"
+                },
+                "username": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_USER"
+                },
+                "password": {
+                    "_gen": "env",
+                    "var": "POSTGRESQL_PASSWORD"
+                }
+            }
+        }
+    }    
+}
