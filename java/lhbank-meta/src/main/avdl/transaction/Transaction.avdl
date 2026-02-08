@@ -2,7 +2,15 @@
 protocol TransactionProtocol {
 
 	record Transaction {
-		long id;
-
+		string transaction_id;
+		string card_number;
+		double amount;
+		string currency;
+		string merchant_id;
+		string merchant_category_id;
+		string channel;
+		string country;
+		string city;
+		timestamp_ms transaction_date;
 	}
 }

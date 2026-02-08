@@ -3,6 +3,6 @@ protocol CardHolderStateProtocol {
 	import idl "../CardHolder.avdl";
 
 	record CardHolderState {
-		CardHolder cardHolder;
+		CardHolder card_holder;
 	}
 }

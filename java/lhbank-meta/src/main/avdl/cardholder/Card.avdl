@@ -4,6 +4,6 @@ protocol CardProtocol {
 	record Card {
 		string number;
 		string type;
-		string expiryDate;
+		string expiry_date;
 	}
 }

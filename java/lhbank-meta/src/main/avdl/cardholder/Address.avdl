@@ -3,7 +3,7 @@ protocol AddressProtocol {
 
 	record Address {
 		union { null, string } street = null;
-		union { null, string } zipCode = null;
+		union { null, string } zip_code = null;
 		string city;
 		union { null, string } state = null;
 	}

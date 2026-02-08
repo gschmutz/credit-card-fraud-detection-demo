@@ -6,17 +6,17 @@ protocol CardHolderProtocol {
 
 	record CardHolder {
 		string id;
-		union { null, string } firstName = null;
-		string lastName;
-		string emailAddress;
-		string phoneNumber;
-		union { null, string } preferredContact = null;
+		union { null, string } first_name = null;
+		string last_name;
+		string email_address;
+		string phone_number;
+		union { null, string } preferred_contact = null;
 		union { null, string } segment = null;
 		union { null, Card } card = null;
-		long avgTransactionAmount;
+		long avg_transaction_amount;
 		
 		array<Address> addresses;
-		union { null, array<string> } usualCountries = null;
-		timestamp_ms onboardedDate;
+		union { null, array<string> } usual_countries = null;
+		timestamp_ms onboarded_date;
 	}
 }
