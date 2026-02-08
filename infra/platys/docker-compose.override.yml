@@ -1,0 +1,22 @@
+services:
+  lhbank-cardholder-app:
+    image: gschmutz/lhbank-cardholder:0.0.1
+    container_name: lhbank-cardholder-app
+    hostname: lhbank-cardholder-app
+    depends_on:
+      postgresql:
+       condition: service_healthy
+      schema-registry-1:
+       condition: service_healthy
+    environment:
+      SERVER_PORT: 8082
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgresql:5432/customer_db
+      SPRING_DATASOURCE_USERNAME: customer
+      SPRING_DATASOURCE_PASSWORD: abc123!
+      SPRING_KAFKA_PROPERTIES_SCHEMA_REGISTRY_URL: http://schema-registry-1:8081
+    ports:
+      - "29000:8082"
+
+  kafka-connect-1:
+    environment:
+      KAFKA_OPTS: "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks -Djavax.net.ssl.trustStorePassword=changeit"

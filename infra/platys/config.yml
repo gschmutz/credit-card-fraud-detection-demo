@@ -551,8 +551,8 @@
       #
       # ===== Apache Spark Thriftserver ========
       #
-      SPARK_THRIFTSERVER_enable: false
-      SPARK_THRIFTSERVER_use_local_spark: false
+      SPARK_THRIFTSERVER_enable: true
+      SPARK_THRIFTSERVER_use_local_spark: true
       SPARK_THRIFTSERVER_cores_max:
       SPARK_THRIFTSERVER_executor_memory:
       #
@@ -564,7 +564,7 @@
       KYUUBI_engine_type: 'spark_sql'
       KYUUBI_use_local_spark: true
       # "hive" or "in-memory"
-      KYUUBI_local_spark_catalog: in-memory
+      KYUUBI_local_spark_catalog: hive
       KYUUBI_local_spark_jars_repositories: ''
       KYUUBI_local_spark_jars_packages: ''
       KYUUBI_local_spark_jars_excludes: ''
@@ -674,6 +674,7 @@
       # ===== Apache Hive Metastore ========
       #
       HIVE_METASTORE_enable: true
+      HIVE_METASTORE_major_version: 4
       HIVE_METASTORE_use_standalone_edition: true
       HIVE_METASTORE_transactional_event_listener_enabled: false
       # an implementatio of the TransactionalMetaStoreEventListener, for example 'org.apache.hive.hcatalog.listener.DbNotificationListener'
@@ -2549,7 +2550,7 @@
       MINIO_access_key: admin
       MINIO_secret_key: abc123abc123!
       # add additional buckets, comma separated, admin-bucket will be created by default
-      MINIO_buckets: 'lakehouse-bucket'
+      MINIO_buckets: 'iceberg-bucket,hive-bucket,landing-bucket'
       MINIO_browser_enabled: true
       MINIO_upload_data_transfer_to_bucket_enabled: false
       MINIO_upload_data_transfer_bucket_name: 'data-transfer-bucket'
