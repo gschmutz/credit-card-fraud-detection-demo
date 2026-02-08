@@ -204,19 +204,19 @@
             "connection": "kafka",
             "topic": "pub.merchant.merchant.state.v1",
             "vars": {
-                "merchantId": {
+                "merchant_id": {
                     "_gen": "sequentialString",
                     "expr": "merchant-~d"
                 }
             },
             "key": {
                 "_gen": "var",
-                "var": "merchantId"
+                "var": "merchant_id"
             },
             "value": {
-                "merchantId": {
+                "merchant_id": {
                     "_gen": "var",
-                    "var": "merchantId"
+                    "var": "merchant_id"
                 },
                 "name": {
                     "_gen": "string",
@@ -239,18 +239,18 @@
             "connection": "kafka",
             "topic": "pub.merchant.category.state.v1",
             "vars": {
-                "categoryId": {
+                "category_id": {
                     "_gen": "sequentialInteger"
                 }
             },
             "key": {
                 "_gen": "var",
-                "var": "categoryId"
+                "var": "category_id"
             },
             "value": {
-                "categoryId": {
+                "category_id": {
                     "_gen": "var",
-                    "var": "categoryId"
+                    "var": "category_id"
                 },
                 "name": {
                     "_gen": "string",
@@ -266,23 +266,23 @@
             "connection": "kafka",
             "topic": "pub.payment.transaction.delta.v1",
             "vars": {
-                "cardNumber": {
+                "card_number": {
                     "_gen": "lookup",
                     "name": "genCardHolders",
                     "path": [
                         "data","card", "number"
                     ]
                 },
-                "merchantId": {
+                "merchant_id": {
                     "_gen": "lookup",
                     "connection": "kafka",
                     "topic": "pub.merchant.merchant.state.v1",
                     "path": [
                         "value",
-                        "merchantId"
+                        "merchant_id"
                     ]
                 },
-                "merchantName": {
+                "merchant_name": {
                     "_gen": "lookup",
                     "connection": "kafka",
                     "topic": "pub.merchant.merchant.state.v1",
@@ -291,16 +291,16 @@
                         "name"
                     ]
                 },
-                "merchantCategoryId": {
+                "merchant_category_id": {
                     "_gen": "lookup",
                     "connection": "kafka",
                     "topic": "pub.merchant.category.state.v1",
                     "path": [
                         "value",
-                        "categoryId"
+                        "category_id"
                     ]
                 },
-                "countryCode": {
+                "country_code": {
                     "_gen": "string",
                     "expr": "#{Address.countryCode}"
                 },
@@ -311,23 +311,23 @@
             },
             "key": {
                 "_gen": "var",
-                "var": "cardNumber"
+                "var": "card_number"
             },
             "value": {
-                "transactionId": {
+                "transaction_id": {
                     "_gen": "uuid"
                 },
-                "cardNumber": {
+                "card_number": {
                     "_gen": "var",
-                    "var": "cardNumber"
+                    "var": "card_number"
                 },
-                "merchantId": {
+                "merchant_id": {
                     "_gen": "var",
-                    "var": "merchantId"
+                    "var": "merchant_id"
                 },
-                "merchantCategoryId": {
+                "merchant_category_id": {
                     "_gen": "var",
-                    "var": "merchantCategoryId"
+                    "var": "merchant_category_id"
                 },
                 "amount": {
                     "_gen": "weightedOneOf",
@@ -366,13 +366,13 @@
                 },
                 "country": {
                     "_gen": "var",
-                    "var": "countryCode"
+                    "var": "country_code"
                 },
                 "city": {
                     "_gen": "var",
                     "var": "city"
                 },
-                "timestamp": {
+                "transaction_date": {
                     "_gen": "now"
                 }
             },
