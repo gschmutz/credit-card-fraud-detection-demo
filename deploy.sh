@@ -11,3 +11,4 @@ cp ${SCRIPTS_DIR}/docker/*.yml ${DATAPLATFORM_HOME}/
 cp ${SCRIPTS_DIR}/jikkou/*.* ${DATAPLATFORM_HOME}/scripts/jikkou/
 cp ${SCRIPTS_DIR}/shadowtraffic/*.* ${DATAPLATFORM_HOME}/scripts/shadowtraffic/
 
+# copy truststore to data-transfer folder
