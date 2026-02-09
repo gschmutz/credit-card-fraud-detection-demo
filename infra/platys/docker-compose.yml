@@ -489,6 +489,7 @@ services:
       --metrics-port 9400
       --reload completion
       --watch
+      --seed 757928231
     restart: unless-stopped
   #  ================================== Apache Spark ========================================== #
   spark-master:
@@ -849,7 +850,7 @@ services:
       S3_REGION: us-east-1
       S3_AWS_ACCESS_KEY: ${PLATYS_AWS_ACCESS_KEY:-admin}
       S3_AWS_SECRET_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      S3_PATH_STYLE_ACCESS: true
+      S3_PATH_STYLE_ACCESS: 'true'
       HIVE_METASTORE_URI: thrift://hive-metastore:9083
       HIVE_STORAGE_FORMAT: ORC
       HIVE_COMPRESSION_CODEC: GZIP
