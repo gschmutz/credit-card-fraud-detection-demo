@@ -1,8 +1,13 @@
 # Credit Card Fraud End-to-End Streaming Demo
 
+
 ![](./images/data-flow-all.png)
 
-## 00 - Start Platform
+The platform for this demo has been created using the [Platys - Platorm in a box](http://github.com/trivadispf/platys) toolkit. 
+
+It can be combined with WatsonX.data Developer edition and use Minio, MDS and Presto from there. 
+
+## 00 - Starting the Platform
 
 ### Start base services
 
@@ -78,8 +83,8 @@ EMIT CHANGES;
 ### Prepare black list table and use it to flag problematic transactions
 
 ```sql
-CREATE TABLE IF NOT EXISTS mer_blacklist_t (key VARCHAR PRIMARY KEY, merchant_id VARCHAR)
-WITH (kafka_topic='pub.merchant.blacklist.state.v1',
+CREATE TABLE IF NOT EXISTS pay_blacklist_t (key VARCHAR PRIMARY KEY, merchant_id VARCHAR)
+WITH (kafka_topic='pub.payment.blacklist.state.v1',
         value_format='AVRO', key_format='AVRO');
 ```
 

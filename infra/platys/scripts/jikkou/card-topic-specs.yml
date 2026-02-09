@@ -23,7 +23,7 @@ items:
         min.cleanable.dirty.ratio: 0.001
 
   - metadata:
-      name: 'pub.merchant.merchant.state.v1'
+      name: 'pub.payment.blacklist.state.v1'
     spec:
       partitions: 2
       replicas: 3
@@ -34,7 +34,7 @@ items:
         min.cleanable.dirty.ratio: 0.001
 
   - metadata:
-      name: 'pub.merchant.blacklist.state.v1'
+      name: 'pub.ref.merchant.state.v1'
     spec:
       partitions: 2
       replicas: 3
