@@ -63,7 +63,7 @@ public class CardHolderService {
         // build the person
         var person = new Person();
         // assign an id (was previously null which caused Hibernate to error on persist)
-        person.setId(UUID.randomUUID().toString());
+        person.setId(cardHolderDTO.id());
         person.setFirstName(cardHolderDTO.firstName());
         person.setLastName(cardHolderDTO.lastName());
         person.setEmailAddress(cardHolderDTO.emailAddress());

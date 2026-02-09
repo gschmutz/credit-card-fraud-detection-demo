@@ -22,7 +22,8 @@ public class CardHolderStateProducer {
     @Value("${spring.kafka.properties.schema.registry.url}")
     private String schemaRegistryUrl;
 
-    private String kafkaTopic = "dummy";
+    @Value("${customer.topic.name}")
+    private String kafkaTopic = "pub.customer.cardHolder.state.v1";
 
     /**
      * Handle to the Outbox Eventing framework.
