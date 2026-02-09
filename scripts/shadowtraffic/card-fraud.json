@@ -221,7 +221,19 @@
                 "name": {
                     "_gen": "string",
                     "expr": "#{Company.name}"
-                }
+                },
+                "country": {
+                    "_gen": "string",
+                    "expr": "#{Address.countryCode}"
+                },
+                "city": {
+                    "_gen": "string",
+                    "expr": "#{Address.city}"
+                },
+                "category_name": {
+                    "_gen": "string",
+                    "expr": "#{Commerce.department}"
+                }              
             },
             "localConfigs": {
                 "throttleMs": {
@@ -232,33 +244,6 @@
                     ]
                 },
                 "maxEvents": 200
-            }
-        },
-        {
-            "name": "genMerchantCategories",
-            "connection": "kafka",
-            "topic": "pub.merchant.category.state.v1",
-            "vars": {
-                "category_id": {
-                    "_gen": "sequentialInteger"
-                }
-            },
-            "key": {
-                "_gen": "var",
-                "var": "category_id"
-            },
-            "value": {
-                "category_id": {
-                    "_gen": "var",
-                    "var": "category_id"
-                },
-                "name": {
-                    "_gen": "string",
-                    "expr": "#{Commerce.department}"
-                }
-            },
-            "localConfigs": {
-                "maxEvents": 300
             }
         },
         {
@@ -281,32 +266,6 @@
                         "value",
                         "merchant_id"
                     ]
-                },
-                "merchant_name": {
-                    "_gen": "lookup",
-                    "connection": "kafka",
-                    "topic": "pub.merchant.merchant.state.v1",
-                    "path": [
-                        "value",
-                        "name"
-                    ]
-                },
-                "merchant_category_id": {
-                    "_gen": "lookup",
-                    "connection": "kafka",
-                    "topic": "pub.merchant.category.state.v1",
-                    "path": [
-                        "value",
-                        "category_id"
-                    ]
-                },
-                "country_code": {
-                    "_gen": "string",
-                    "expr": "#{Address.countryCode}"
-                },
-                "city": {
-                    "_gen": "string",
-                    "expr": "#{Address.city}"
                 }
             },
             "key": {
@@ -324,10 +283,6 @@
                 "merchant_id": {
                     "_gen": "var",
                     "var": "merchant_id"
-                },
-                "merchant_category_id": {
-                    "_gen": "var",
-                    "var": "merchant_category_id"
                 },
                 "amount": {
                     "_gen": "weightedOneOf",
@@ -364,14 +319,6 @@
                         "ATM"
                     ]
                 },
-                "country": {
-                    "_gen": "var",
-                    "var": "country_code"
-                },
-                "city": {
-                    "_gen": "var",
-                    "var": "city"
-                },
                 "transaction_date": {
                     "_gen": "now"
                 }
@@ -392,7 +339,6 @@
             {
                 "generators": [
                     "genMerchants",
-                    "genMerchantCategories",
                     "genCardHolders"
                 ],
                 "overrides": {
