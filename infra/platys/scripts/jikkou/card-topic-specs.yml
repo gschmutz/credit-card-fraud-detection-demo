@@ -3,7 +3,7 @@ kind: "KafkaTopicList"
 metadata: {}
 items:
   - metadata:
-      name: 'pub.payment.transaction.delta.v1'
+      name: 'priv.payment.transaction.delta.v1'
     spec:
       partitions: 2
       replicas: 3
@@ -23,7 +23,7 @@ items:
         min.cleanable.dirty.ratio: 0.001
 
   - metadata:
-      name: 'pub.payment.blacklist.state.v1'
+      name: 'priv.payment.blacklist.state.v1'
     spec:
       partitions: 2
       replicas: 3
@@ -45,7 +45,7 @@ items:
         min.cleanable.dirty.ratio: 0.001
 
   - metadata:
-      name: 'priv.ref.geonames.state.v1'
+      name: 'pub.ref.geonames.state.v1'
     spec:
       partitions: 1
       replicas: 3
