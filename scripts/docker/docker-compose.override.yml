@@ -3,6 +3,11 @@ services:
     image: gschmutz/lhbank-cardholder:0.0.1
     container_name: lhbank-cardholder-app
     hostname: lhbank-cardholder-app
+    labels:
+      com.platys.name: none
+      com.platys.description: CardHolder Spring Boot Application
+      com.platys.restapi.title: Spark UI
+      com.platys.restapi.url: http://dataplatform:29000    
     depends_on:
       postgresql:
        condition: service_healthy
@@ -20,3 +25,25 @@ services:
   kafka-connect-1:
     environment:
       KAFKA_OPTS: "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks -Djavax.net.ssl.trustStorePassword=changeit"
+  spark-master:
+    environment:
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks -Djavax.net.ssl.trustStorePassword=changeit"
+      # Watson Iceberg REST Catalog configuration
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_type: rest
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_uri: https://ibm-lh-presto-svc:8180/mds/iceberg
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_rest_auth_type: basic
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_rest_auth_basic_username: ibmlhadmin
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_rest_auth_basic_password: password
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_warehouse: iceberg_data
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_io___impl: org.apache.iceberg.aws.s3.S3FileIO
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_s3_endpoint: http://ibm-lh-presto-svc:9000
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_s3_path___style___access: true
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_s3_access___key___id: f33150f834d9a8b2435474f6
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_s3_secret___access___key: fdd7d613b2c72d07c3618ae6
+
+  presto-1:
+    environment:
+      POSTGRESQL_DATABASE: customer_db
+      POSTGRESQL_USER: customer
+      POSTGRESQL_PASSWORD: abc123!

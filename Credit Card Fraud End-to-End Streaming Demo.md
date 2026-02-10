@@ -383,7 +383,11 @@ docker exec -ti minio-mc mc mb minio-1/iceberg-bucket
 ```
 
 * <http://dataplatform:9000> - Local
-* <http://ibm-lh-presto-svc:9000> - IBM WatsonX.data Dev
+	* User: `admin`
+   * Password: `abc123abc123!`
+* <http://ibm-lh-presto-svc:9000> - IBM WatsonX.data Dev 
+	* User: `f33150f834d9a8b2435474f6`
+   * Password: `fdd7d613b2c72d07c3618ae6`
 
 ![](./images/iceberg.png)
 
