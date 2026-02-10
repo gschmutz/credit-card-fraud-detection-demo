@@ -38,7 +38,7 @@ docker exec -it ksqldb-cli ksql http://ksqldb-server-1:8088
 
 ``` sql
 CREATE STREAM IF NOT EXISTS pay_transaction_s 
-  WITH (kafka_topic='pub.payment.transaction.delta.v1',
+  WITH (kafka_topic='priv.pay.transaction.delta.v1',
         value_format='AVRO');
 ```
 
@@ -84,10 +84,11 @@ EMIT CHANGES;
 
 ```sql
 CREATE TABLE IF NOT EXISTS pay_blacklist_t (key VARCHAR PRIMARY KEY, merchant_id VARCHAR)
-WITH (kafka_topic='pub.payment.blacklist.state.v1',
+WITH (kafka_topic='priv.pay.blacklist.state.v1',
         value_format='AVRO', key_format='AVRO');
 ```
 
+let's join the transaction stream with the blacklist table
 
 ```sql
 SELECT t.*
@@ -95,24 +96,48 @@ SELECT t.*
 			WHEN bl.key IS NOT NULL 
 			THEN 1 else 0 
 		END 					AS is_flagged
+	, CASE 
+			WHEN bl.key IS NOT NULL 
+			THEN 'blacklist' else ''
+		END 					AS flagged_reason		
 FROM pay_transaction_s		t
-LEFT JOIN mer_blacklist_t  bl
+LEFT JOIN pay_blacklist_t  bl
 ON (t.merchant_id = bl.key)
 EMIT CHANGES;
 ```
 
+As the black list is currently empty, no transaction is flagged, which is of course ok!
+
+In another terminal, insert a merchant into the black list table
+
+``` bash
+docker exec -it ksqldb-cli ksql http://ksqldb-server-1:8088
 ```
+
+```sql
+INSERT INTO pay_blacklist_t (key, merchant_id)
+VALUES ('merchant-199', 'merchant-199');
+```
+
+You should no start to see some flagged transactions in the other window. As it is a bit hard to spot among the many non-problematic transactions, let's just slect the ones where the flag is not `0`. 
+
+Stop the query. 
+
+For doing that, we persist the join into another stream
+
+```
+DROP STREAM IF EXISTS pay_transaction_flagged_enriched_s;
 DROP STREAM IF EXISTS pay_transaction_flagged_s;
 
 CREATE STREAM pay_transaction_flagged_s
-  WITH (kafka_topic='priv.payment.transaction-flagged.delta.v1',
+  WITH (kafka_topic='priv.pay.transaction-flagged.delta.v1',
         value_format='AVRO', key_format='AVRO', partitions=2)
 AS
 	SELECT t.transaction_id
 	, t.card_number
 	, t.currency
 	, t.amount
-	, t.merchant_id			AS merchant_id
+	, t.merchant_id
 	, t.channel
 	, t.transaction_date
 	, CASE 
@@ -124,11 +149,12 @@ AS
 			THEN 'blacklist' else ''
 		END 					AS flagged_reason
 	FROM pay_transaction_s		t
-	LEFT JOIN mer_blacklist_t  bl
+	LEFT JOIN pay_blacklist_t  bl
 		ON (t.merchant_id = bl.key)
-	PARTITION BY t.card_number
 	EMIT CHANGES; 
 ```
+
+Now let' only view the flagged transactions
 
 ```sql
 SELECT * 
@@ -137,24 +163,13 @@ WHERE is_flagged = 1
 EMIT CHANGES;
 ```
 
-Insert a merchant to the black list
-
-
-``` bash
-docker exec -it ksqldb-cli ksql http://ksqldb-server-1:8088
-```
-
-```sql
-INSERT INTO mer_blacklist_t (key, merchant_id)
-VALUES ('merchant-199', 'merchant-199');
-```
-
+if you think it takes to long, you can of course add other merchants to the blacklist. 
 
 ### Prepare table `mer_merchant_t` and join it to transactions
 
 ```sql
-CREATE TABLE IF NOT EXISTS mer_merchant_t (key STRING PRIMARY KEY)
-  WITH (kafka_topic='pub.merchant.merchant.state.v1',
+CREATE TABLE IF NOT EXISTS ref_merchant_t (key STRING PRIMARY KEY)
+  WITH (kafka_topic='pub.ref.merchant.state.v1',
         value_format='AVRO', key_format='AVRO');
 ```
 
@@ -165,7 +180,7 @@ SELECT t.*
 		, m.city
 		, m.category_name
 FROM pay_transaction_flagged_s		t
-LEFT JOIN mer_merchant_t m
+LEFT JOIN ref_merchant_t m
 	ON (t.merchant_id = m.key)
 EMIT CHANGES; 
 ```
@@ -174,7 +189,7 @@ EMIT CHANGES;
 DROP STREAM IF EXISTS pay_transaction_flagged_enriched_s;
 
 CREATE STREAM pay_transaction_flagged_enriched_s
-  WITH (kafka_topic='priv.payment.transaction-flagged-enriched.delta.v1',
+  WITH (kafka_topic='priv.pay.transaction-flagged-enriched.delta.v1',
         value_format='AVRO', key_format='AVRO', partitions=2)
 AS
 	SELECT t.transaction_id
@@ -191,9 +206,8 @@ AS
 		, m.city
 		, m.category_name
 	FROM pay_transaction_flagged_s		t
-	LEFT JOIN mer_merchant_t m
+	LEFT JOIN ref_merchant_t m
 		ON (t.merchant_id = m.key)
-	PARTITION BY t.card_number
 	EMIT CHANGES; 
 ```
 
@@ -239,7 +253,7 @@ EMIT CHANGES;
 
 ```sql
 CREATE STREAM IF NOT EXISTS cus_cardholder_s
-WITH (kafka_topic='pub.customer.cardHolder.state.v1',
+WITH (kafka_topic='pub.cus.cardHolder.state.v1',
         value_format='AVRO');
 ```
 
@@ -260,7 +274,7 @@ WITH (kafka_topic='CUS_CARDHOLDER_BY_CARD_NUMBER_S',
 
 ```sql
 CREATE STREAM pay_transaction_flagged2_enriched_s
-  WITH (kafka_topic='priv.payment.transaction-flagged2-enriched.delta.v1',
+  WITH (kafka_topic='priv.pay.transaction-flagged2-enriched.delta.v1',
         value_format='AVRO', key_format='AVRO', partitions=2)
 AS
 	SELECT t.transaction_id
@@ -327,7 +341,7 @@ LEFT JOIN ref_geonames_t g
 EMIT CHANGES;
 ```
 
-## 02 - Transactions to S3 Object Storage as Iceberg Tables
+## 02 - Write Transactions as Iceberg tables to S3 Object Storage using Kafka Connect
 
 What is file format? and what is a table format?
 
@@ -337,11 +351,13 @@ We are using [Apache Iceberg](https://iceberg.apache.org/) table format in this 
 
 ### Preopare the Raw Transactions Iceberg table
 
-#### a) Spark SQL
+#### Using Spark SQL to create the table
 
 ```bash
 docker exec -ti spark-master spark-sql
 ```
+
+change `hiverest` to `watson` to connect to WatsonX developer edition. 
 
 ```sql
 use hiverest;
@@ -358,28 +374,6 @@ CREATE TABLE payment_db.raw_transaction_t (
     channel STRING,
     transaction_date TIMESTAMP)
 PARTITIONED BY (hours(transaction_date));
-```
-
-#### b) Presto (we can also create tables via presto, if needed)
-
-```
-CREATE SCHEMA payment_db
-WITH (
-  location = 's3a://iceberg-bucket/payment_db'
-);
-
-CREATE TABLE "iceberg_data"."payment_db"."raw_transaction_t" (
-    transaction_id VARCHAR,
-    card_number VARCHAR,
-    currency VARCHAR,
-    amount DOUBLE,
-    merchant_id VARCHAR,
-    channel VARCHAR,
-    transaction_date TIMESTAMP
-)
-WITH (
-    partitioning = ARRAY['hour(transaction_date)']
-);
 ```
 
 Create the bucket (should already been created in the startup)
@@ -412,10 +406,9 @@ Create the `control-iceberg` control topic, needed for the Kafka Connect [Iceber
 ```bash
 docker exec -it kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic control-iceberg --partitions 1 --replication-factor 3
 ```
+#### Kafka Connect (Local)
 
 ```bash
-#!/bin/bash
-
 curl -X PUT \
   http://$DATAPLATFORM_IP:8083/connectors/pay-transaction-kafka-to-s3/config \
   -H 'Content-Type: application/json' \
@@ -423,7 +416,7 @@ curl -X PUT \
   -d '{
       "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
       "tasks.max": "1",
-      "topics": "pub.payment.transaction.delta.v1",
+      "topics": "priv.pay.transaction.delta.v1",
       "iceberg.tables": "payment_db.raw_transaction_t",
       "iceberg.tables.dynamic-enabled": "false",
       "write.upsert.enabled": "false",
@@ -453,7 +446,7 @@ curl -X PUT \
   -d '{
       "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
       "tasks.max": "1",
-      "topics": "pub.payment.transaction.delta.v1",
+      "topics": "priv.pay.transaction.delta.v1",
       "iceberg.tables": "payment_db.raw_transaction_t",
       "iceberg.tables.dynamic-enabled": "false",
       "write.upsert.enabled": "false",
@@ -467,45 +460,42 @@ curl -X PUT \
       "iceberg.catalog.s3.path-style-access": "true",
       "iceberg.catalog.s3.access-key-id": "f33150f834d9a8b2435474f6",
       "iceberg.catalog.s3.secret-access-key": "fdd7d613b2c72d07c3618ae6",
-  "iceberg.catalog.rest.auth.type": "basic",
-  "iceberg.catalog.rest.auth.basic.username": "admin",
-  "iceberg.catalog.rest.auth.basic.password": "abc123abc123!",
+  	   "iceberg.catalog.rest.auth.type": "basic",
+      "iceberg.catalog.rest.auth.basic.username": "admin",
+      "iceberg.catalog.rest.auth.basic.password": "abc123abc123!",
       "value.converter": "io.confluent.connect.avro.AvroConverter",
       "value.converter.schema.registry.url": "http://schema-registry-1:8081",
       "key.converter": "org.apache.kafka.connect.storage.StringConverter"
 	}'
 ```
 
-### Flagged Transactions to Iceberg (TO-BE-CHECKED)
+### Flagged Transactions to Iceberg
 
 ```bash
 docker exec -ti spark-master spark-sql
 ```
 
 ```sql
-use hiverest;
+# either use `hiverest` or `watson`
 
+DROP TABLE IF EXISTS payment_db.raw_transaction_flagged_t;
 
-CREATE TABLE payment_db.transaction_flagged_enriched_t (
-    transactionId STRING,
+CREATE TABLE payment_db.raw_transaction_flagged_t (
+    transaction_id STRING,
     card_number STRING,
-    country STRING,
-    city STRING,
     currency STRING,
     amount DOUBLE,
-    merchantId STRING,
-    merchantCategoryId STRING,
+    merchant_id STRING,
     channel STRING,
-    timestamp TIMESTAMP,
-    flagged INTEGER,
-    categoryName STRING,
-    merchantName STRING)
-PARTITIONED BY (hours(timestamp));
+    transaction_date TIMESTAMP,
+    is_flagged INTEGER,
+    flagged_reason STRING)
+PARTITIONED BY (hours(transaction_date));
 ```
 
-```bash
-#!/bin/bash
+**Local**
 
+```bash
 curl -X PUT \
   http://$DATAPLATFORM_IP:8083/connectors/pay-transaction-flagged-enriched-kafka-to-s3/config \
   -H 'Content-Type: application/json' \
@@ -513,8 +503,8 @@ curl -X PUT \
   -d '{
       "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
       "tasks.max": "1",
-      "topics": "priv.payment.transaction-flagged-enriched.delta.v1",
-      "iceberg.tables": "payment_db.transaction_flagged_enriched_t",
+      "topics": "priv.pay.transaction-flagged.delta.v1",
+      "iceberg.tables": "payment_db.raw_transaction_flagged_t",
       "iceberg.tables.dynamic-enabled": "false",
       "write.upsert.enabled": "false",
       "iceberg.control.commit.interval-ms": "60000",
@@ -533,16 +523,158 @@ curl -X PUT \
 	}'
 ```
 
+**WatsonX**
 
-## 03 - Merchant to Iceberg
+```bash
+curl -X PUT \
+  http://$DATAPLATFORM_IP:8083/connectors/pay-transaction-flagged-enriched-kafka-to-s3/config \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{
+      "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
+      "tasks.max": "1",
+      "topics": "priv.pay.transaction-flagged.delta.v1",
+      "iceberg.tables": "payment_db.raw_transaction_flagged_t",
+      "iceberg.tables.dynamic-enabled": "false",
+      "write.upsert.enabled": "false",
+      "iceberg.control.commit.interval-ms": "60000",
+      "consumer.max.poll.records": "5000",
+      "iceberg.catalog.type": "rest",
+      "iceberg.catalog.uri": "https://ibm-lh-presto-svc:8180/mds/iceberg",
+      "iceberg.catalog.warehouse": "iceberg_data",      
+      "iceberg.catalog.client.region": "none",
+      "iceberg.catalog.s3.endpoint": "http://ibm-lh-presto-svc:9000",
+      "iceberg.catalog.s3.path-style-access": "true",
+      "iceberg.catalog.s3.access-key-id": "f33150f834d9a8b2435474f6",
+      "iceberg.catalog.s3.secret-access-key": "fdd7d613b2c72d07c3618ae6",
+  	   "iceberg.catalog.rest.auth.type": "basic",
+      "iceberg.catalog.rest.auth.basic.username": "admin",
+      "iceberg.catalog.rest.auth.basic.password": "abc123abc123!",
+      "value.converter": "io.confluent.connect.avro.AvroConverter",
+      "value.converter.schema.registry.url": "http://schema-registry-1:8081",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter"
+	}'
+```
 
+## 03 - Validate the ingest by querying the Iceberg table using Spark SQL
+
+We can also use Spark SQL to query the data, either from the command line as used before
+
+```bash
+docker exec -ti spark-master spark-sql
+```
+
+```
+use hiverest;
+SELECT * FROM payment_db.raw_transaction_t;
+```
+
+or using jupyter (navigate to <http://dataplatform:28888> to open Jupyter)
+
+```python
+import os
+# get the accessKey and secretKey from Environment
+accessKey = os.environ['AWS_ACCESS_KEY_ID']
+secretKey = os.environ['AWS_SECRET_ACCESS_KEY']
+
+from pyspark.sql import SparkSession
+spark = (
+    SparkSession.builder
+        .appName("Jupyter")
+        .master("local[*]")
+
+        .config("spark.jars.packages",
+                "org.apache.iceberg:iceberg-spark-runtime-4.0_2.13:1.10.1,"
+                "org.apache.iceberg:iceberg-aws-bundle:1.10.1")
+
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .config("spark.hadoop.fs.s3a.endpoint", "http://ibm-lh-presto-svc:9000")
+        .config("spark.hadoop.fs.s3a.path.style.access", "true")
+        .config("spark.hadoop.fs.s3a.access.key", "f33150f834d9a8b2435474f6")
+        .config("spark.hadoop.fs.s3a.secret.key", "fdd7d613b2c72d07c3618ae6")
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
+
+        # ==== Iceberg catalog (local) ===
+        .config("spark.sql.catalog.hiverest", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.hiverest.type", "rest")
+        .config("spark.sql.catalog.hiverest.uri", "http://hive-metastore:9084/iceberg")
+        .config("spark.sql.catalog.hiverest.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        .config("spark.sql.catalog.hiverest.warehouse", "s3a://admin-bucket/iceberg/warehouse")
+
+        # ⭐ REQUIRED FOR MINIO WITH ICEBERG AWS SDK
+        .config("spark.sql.catalog.hiverest.s3.endpoint", "http://minio-1:9000")
+        .config("spark.sql.catalog.hiverest.s3.path-style-access", "true")
+        .config("spark.sql.catalog.hiverest.s3.access-key-id", accessKey)
+        .config("spark.sql.catalog.hiverest.s3.secret-access-key", secretKey)
+    
+        # ==== Iceberg catalog (watson) ===
+        .config("spark.sql.catalog.watson", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.watson.type", "rest")
+        .config("spark.sql.catalog.watson.uri", "https://ibm-lh-presto-svc:8180/mds/iceberg")
+        .config("spark.sql.catalog.watson.rest.auth.type", "basic")
+        .config("spark.sql.catalog.watson.rest.auth.basic.username", "ibmlhadmin")
+        .config("spark.sql.catalog.watson.rest.auth.basic.password", "password")    
+        .config("spark.sql.catalog.watson.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        .config("spark.sql.catalog.watson.warehouse", "iceberg_data")
+
+        # ⭐ REQUIRED FOR MINIO WITH ICEBERG AWS SDK
+        .config("spark.sql.catalog.watson.s3.endpoint", "http://ibm-lh-presto-svc:9000")
+        .config("spark.sql.catalog.watson.s3.path-style-access", "true")
+        .config("spark.sql.catalog.watson.s3.access-key-id", "f33150f834d9a8b2435474f6")
+        .config("spark.sql.catalog.watson.s3.secret-access-key", "fdd7d613b2c72d07c3618ae6")
+
+        # use "hiverest" for local setup, "watson" for the watsonx developer setup
+        .config("spark.sql.defaultCatalog", "hiverest")
+
+        .config(
+            "spark.driver.extraJavaOptions",
+            "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks " +
+            "-Djavax.net.ssl.trustStorePassword=changeit"
+        )
+        .config(
+            "spark.executor.extraJavaOptions",
+            "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks " +
+            "-Djavax.net.ssl.trustStorePassword=changeit"
+        )
+
+        .config(
+            "spark.sql.extensions",
+            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+        )
+
+        .getOrCreate()
+)
+```
+
+```sql
+%load_ext sql
+%config SqlMagic.displaylimit = 50
+%sql spark
+```
+
+```sql
+%%sql
+describe payment_db.raw_transaction_t
+```
+
+```sql
+%%sql
+SELECT * FROM payment_db.raw_transaction_t;
+```
+
+```
+%%sql
+SELECT * FROM payment_db.raw_transaction_flagged_t;
+```
+
+## 04 - Write Merchants as Iceberg tables to S3 Object Storage using Kafka Connect
 
 ```bash
 docker exec -ti spark-master spark-sql
 ```
 
 ```sql
-use hiverest;
+# either use `hiverest` or `watson`
 
 CREATE DATABASE IF NOT EXISTS refdata_db
 LOCATION 's3a://iceberg-bucket/refdata_db';
@@ -556,9 +688,9 @@ CREATE TABLE refdata_db.raw_merchant_t (
     );
 ```
 
-```bash
-#!/bin/bash
+**Local**
 
+```bash
 curl -X PUT \
   http://$DATAPLATFORM_IP:8083/connectors/ref-merchant-kafka-to-s3/config \
   -H 'Content-Type: application/json' \
@@ -566,7 +698,7 @@ curl -X PUT \
   -d '{
       "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
       "tasks.max": "1",
-      "topics": "pub.merchant.merchant.state.v1",
+      "topics": "pub.ref.merchant.state.v1",
       "iceberg.tables": "refdata_db.raw_merchant_t",
       "iceberg.tables.dynamic-enabled": "false",
       "write.upsert.enabled": "false",
@@ -586,11 +718,44 @@ curl -X PUT \
 	}'
 ```
 
-## 04 - Using Spark to curate with Transaction data
+**WatsonX**
+
+```bash
+curl -X PUT \
+  http://$DATAPLATFORM_IP:8083/connectors/ref-merchant-kafka-to-s3/config \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{
+      "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
+      "tasks.max": "1",
+      "topics": "pub.ref.merchant.state.v1",
+      "iceberg.tables": "refdata_db.raw_merchant_t",
+      "iceberg.tables.dynamic-enabled": "false",
+      "write.upsert.enabled": "false",
+      "iceberg.control.commit.interval-ms": "60000",
+      "consumer.max.poll.records": "5000",
+      "iceberg.catalog.type": "rest",
+      "iceberg.catalog.uri": "https://ibm-lh-presto-svc:8180/mds/iceberg",
+      "iceberg.catalog.warehouse": "iceberg_data",      
+      "iceberg.catalog.client.region": "none",
+      "iceberg.catalog.s3.endpoint": "http://ibm-lh-presto-svc:9000",
+      "iceberg.catalog.s3.path-style-access": "true",
+      "iceberg.catalog.s3.access-key-id": "f33150f834d9a8b2435474f6",
+      "iceberg.catalog.s3.secret-access-key": "fdd7d613b2c72d07c3618ae6",
+  	   "iceberg.catalog.rest.auth.type": "basic",
+      "iceberg.catalog.rest.auth.basic.username": "admin",
+      "iceberg.catalog.rest.auth.basic.password": "abc123abc123!",
+      "value.converter": "io.confluent.connect.avro.AvroConverter",
+      "value.converter.schema.registry.url": "http://schema-registry-1:8081",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter"
+	}'
+```
+
+## 05 - Using Spark to curate Transaction data
 
 ![](https://www.acte.in/wp-content/uploads/2020/07/sql-tutorial.png)
 
-```pyhton
+```python
 import os
 # get the accessKey and secretKey from Environment
 accessKey = os.environ['AWS_ACCESS_KEY_ID']
@@ -607,14 +772,13 @@ spark = (
                 "org.apache.iceberg:iceberg-aws-bundle:1.10.1")
 
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio-1:9000")
+        .config("spark.hadoop.fs.s3a.endpoint", "http://ibm-lh-presto-svc:9000")
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.access.key", accessKey)
-        .config("spark.hadoop.fs.s3a.secret.key", secretKey)
+        .config("spark.hadoop.fs.s3a.access.key", "f33150f834d9a8b2435474f6")
+        .config("spark.hadoop.fs.s3a.secret.key", "fdd7d613b2c72d07c3618ae6")
         .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
 
-    
-        # Iceberg catalog
+        # ==== Iceberg catalog (local) ===
         .config("spark.sql.catalog.hiverest", "org.apache.iceberg.spark.SparkCatalog")
         .config("spark.sql.catalog.hiverest.type", "rest")
         .config("spark.sql.catalog.hiverest.uri", "http://hive-metastore:9084/iceberg")
@@ -626,8 +790,36 @@ spark = (
         .config("spark.sql.catalog.hiverest.s3.path-style-access", "true")
         .config("spark.sql.catalog.hiverest.s3.access-key-id", accessKey)
         .config("spark.sql.catalog.hiverest.s3.secret-access-key", secretKey)
+    
+        # ==== Iceberg catalog (watson) ===
+        .config("spark.sql.catalog.watson", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.watson.type", "rest")
+        .config("spark.sql.catalog.watson.uri", "https://ibm-lh-presto-svc:8180/mds/iceberg")
+        .config("spark.sql.catalog.watson.rest.auth.type", "basic")
+        .config("spark.sql.catalog.watson.rest.auth.basic.username", "ibmlhadmin")
+        .config("spark.sql.catalog.watson.rest.auth.basic.password", "password")    
+        .config("spark.sql.catalog.watson.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        .config("spark.sql.catalog.watson.warehouse", "iceberg_data")
 
+        # ⭐ REQUIRED FOR MINIO WITH ICEBERG AWS SDK
+        .config("spark.sql.catalog.watson.s3.endpoint", "http://ibm-lh-presto-svc:9000")
+        .config("spark.sql.catalog.watson.s3.path-style-access", "true")
+        .config("spark.sql.catalog.watson.s3.access-key-id", "f33150f834d9a8b2435474f6")
+        .config("spark.sql.catalog.watson.s3.secret-access-key", "fdd7d613b2c72d07c3618ae6")
+
+        # use "hiverest" for local setup, "watson" for the watsonx developer setup
         .config("spark.sql.defaultCatalog", "hiverest")
+
+        .config(
+            "spark.driver.extraJavaOptions",
+            "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks " +
+            "-Djavax.net.ssl.trustStorePassword=changeit"
+        )
+        .config(
+            "spark.executor.extraJavaOptions",
+            "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks " +
+            "-Djavax.net.ssl.trustStorePassword=changeit"
+        )
 
         .config(
             "spark.sql.extensions",
@@ -640,6 +832,7 @@ spark = (
 
 ```sql
 %load_ext sql
+%config SqlMagic.displaylimit = 50
 %sql spark
 ```
 
@@ -742,7 +935,78 @@ result_df.write.format("iceberg") \
 SELECT * FROM payment_db.cur_transaction_with_merchant_t
 ```
 
-## 05 - Card Holder Integration
+## 06 - Using Presto to query and curate
+
+![](https://prestodb.io/wp-content/uploads/presto-ecosystem-diagram.png)
+
+```sql
+SELECT t.transaction_id,
+       t.card_number,
+       t.currency,
+       t.amount,
+       t.channel,
+       t.transaction_date,
+       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
+       m.name,
+       m.country,
+       m.city,
+       m.category_name
+FROM iceberg_hive_rest.payment_db.raw_transaction_t t
+LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
+       ON t.merchant_id = m.merchant_id
+```
+
+now let's join the `person_t` table
+
+```sql
+SELECT t.transaction_id,
+       t.card_number,
+       t.currency,
+       t.amount,
+       t.channel,
+       t.transaction_date,
+       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
+       m.name,
+       m.country,
+       m.city,
+       m.category_name,
+       p.first_name,
+       p.last_name
+FROM iceberg_hive_rest.payment_db.raw_transaction_t t
+LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
+       ON t.merchant_id = m.merchant_id
+LEFT JOIN iceberg_hive_rest.customer_db.cur_card_t c
+ 		ON t.card_number = c.card_number
+LEFT JOIN iceberg_hive_rest.customer_db.cur_person_t p
+ 		ON c.person_id = p.person_id
+```
+
+we could have also used the table `person` and `card` from the original source system. 
+
+```sql
+SELECT t.transaction_id,
+       t.card_number,
+       t.currency,
+       t.amount,
+       t.channel,
+       t.transaction_date,
+       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
+       m.name,
+       m.country,
+       m.city,
+       m.category_name,
+       p.first_name,
+       p.last_name
+FROM iceberg_hive_rest.payment_db.raw_transaction_t t
+LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
+       ON t.merchant_id = m.merchant_id
+LEFT JOIN postgresql.public.card c
+ 		ON t.card_number = c.card_number
+LEFT JOIN postgresql.public.person p
+ 		ON c.person_id = p.person_id
+```
+
+## 07 - Card Holder Integration
 
 ### Polling-based CDC using Kafka Connect JDBC Connector
 
@@ -750,22 +1014,23 @@ SELECT * FROM payment_db.cur_transaction_with_merchant_t
 
 
 ```bash
-docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.customer.person.cdc.v1 --partitions 2 --replication-factor 3
+docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.cus.person.cdc.v1 --partitions 2 --replication-factor 3
 
-docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.customer.address.cdc.v1 --partitions 2 --replication-factor 3
+docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.cus.address.cdc.v1 --partitions 2 --replication-factor 3
 
-docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.customer.country.cdc.v1 --partitions 2 --replication-factor 3
+docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.cus.country.cdc.v1 --partitions 2 --replication-factor 3
 
-docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.customer.card.cdc.v1 --partitions 2 --replication-factor 3
+docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.cus.card.cdc.v1 --partitions 2 --replication-factor 3
 ```
 
 ```bash
 curl -X "POST" "$DATAPLATFORM_IP:8083/connectors" \
      -H "Content-Type: application/json" \
      -d '{
-  "name": "customer.jdbcsrc.cdc",
+  "name": "customer.jdbcsrc.query-based-cdc",
   "config": {
     "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+    "name": "customer.jdbcsrc.query-based-cdc",
     "tasks.max": "1",
     "connection.url": "jdbc:postgresql://postgresql/customer_db?user=customer&password=abc123!",
     "mode": "timestamp",
@@ -773,12 +1038,11 @@ curl -X "POST" "$DATAPLATFORM_IP:8083/connectors" \
     "poll.interval.ms": "10000",
     "table.whitelist": "public.person, public.address, public.country, public.card",
     "validate.non.null": "false",
-    "topic.prefix": "priv.customer.",
+    "topic.prefix": "priv.cus.",
     "key.converter": "org.apache.kafka.connect.storage.StringConverter",
     "key.converter.schemas.enable": "false",
     "value.converter": "io.confluent.connect.avro.AvroConverter",
     "value.converter.schema.registry.url": "http://schema-registry-1:8081",    
-    "name": "customer.jdbcsrc.cdc",
     "transforms": "createKey,extractInt,addSuffix",
     "transforms.createKey.type": "org.apache.kafka.connect.transforms.ValueToKey",
     "transforms.createKey.fields": "id",
@@ -792,7 +1056,7 @@ curl -X "POST" "$DATAPLATFORM_IP:8083/connectors" \
 ```
 
 ```bash
-kcat -b localhost -t priv.customer.person.cdc.v1 -q -r http://localhost:8081 -s value=avro
+kcat -b localhost -t priv.cus.person.cdc.v1 -q -r http://localhost:8081 -s value=avro
 ```
 
 ### Log-based CDC using Debezium and Kafka Connect
@@ -802,12 +1066,13 @@ kcat -b localhost -t priv.customer.person.cdc.v1 -q -r http://localhost:8081 -s 
 
 ```
 curl -X PUT \
-  "http://$DATAPLATFORM_IP:8083/connectors/customer.dbzsrc.cdc/config" \
+  "http://$DATAPLATFORM_IP:8083/connectors/customer.dbzsrc.log-based-cdc/config" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
   -d '{
   "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
   "tasks.max": "1",
+  "slot.name":"dbzlogbased",
   "database.server.name": "postgresql",
   "database.port": "5432",
   "database.user": "customer",
@@ -845,7 +1110,7 @@ curl -X PUT \
   -d '{
   "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
   "tasks.max": "1",
-
+  "slot.name":"dbzoutbox",  
   "database.server.name": "postgresql",
   "database.port": "5432",
   "database.user": "customer",
@@ -855,7 +1120,7 @@ curl -X PUT \
   "schema.include.list": "public",
   "table.include.list": "public.outbox",
   "plugin.name": "pgoutput",
-  "publication.name":"debezium",
+  "publication.name":"dbzoutbox",
   "slot.name":"debezium",
   "tombstones.on.delete": "false",
   "database.hostname": "postgresql",
@@ -865,7 +1130,7 @@ curl -X PUT \
   "transforms.outbox.table.field.event.key": "event_key",
   "transforms.outbox.table.field.event.payload": "payload_avro",
   "transforms.outbox.route.by.field": "event_type",
-  "transforms.outbox.route.topic.replacement": "pub.customer.${routedByValue}.state.v1",
+  "transforms.outbox.route.topic.replacement": "pub.cus.${routedByValue}.state.v1",
   "value.converter": "io.debezium.converters.BinaryDataConverter",
   "topic.creation.default.replication.factor": 3,
   "topic.creation.default.partitions": 8,
@@ -874,7 +1139,7 @@ curl -X PUT \
 ```
 
 ```
-kcat -b localhost -t pub.customer.cardHolder.state.v1 -r http://localhost:8081 -s value=avro -o end -q
+kcat -b localhost -t pub.cus.cardHolder.state.v1 -r http://localhost:8081 -s value=avro -o end -q
 ```
 
 ### Why not sending directly to Kafka?
@@ -885,16 +1150,16 @@ kcat -b localhost -t pub.customer.cardHolder.state.v1 -r http://localhost:8081 -
 
 ![](./images/virtual-outbox.png)
 
-## 06 - Card Holder to Iceberg
+## 08 - Card Holder to Iceberg
 
-### Raw data `card_holder_t`
+### Raw data `raw_card_holder_t`
 
 ```bash
 docker exec -ti spark-master spark-sql
 ```
 
-
 ```sql
+# either use `hiverest` or `watson`
 use hiverest;
 
 CREATE DATABASE customer_db
@@ -931,14 +1196,7 @@ CREATE TABLE customer_db.raw_card_holder_t (
 );
 ```
 
-```
-%%sql
-SELECT card_holder.id, count(*)
-FROM customer_db.raw_card_holder_t
-GROUP BY card_holder.id
-HAVING COUNT(*) > 1;
-```
-
+**Local**
 
 ```
 curl -X PUT \
@@ -948,7 +1206,7 @@ curl -X PUT \
   -d '{
       "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
       "tasks.max": "1",
-      "topics": "pub.customer.cardHolder.state.v1",
+      "topics": "pub.cus.cardHolder.state.v1",
       "iceberg.tables": "customer_db.raw_card_holder_t",
       "iceberg.tables.dynamic-enabled": "false",
       "write.upsert.enabled": "false",
@@ -968,7 +1226,40 @@ curl -X PUT \
 	}'
 ```
 
-## 07 - Curation Card Holder Data
+**Watson**
+
+```
+curl -X PUT \
+  http://$DATAPLATFORM_IP:8083/connectors/cus-cardholder-kafka-to-s3/config \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{
+      "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
+      "tasks.max": "1",
+      "topics": "pub.cus.cardHolder.state.v1",
+      "iceberg.tables": "customer_db.raw_card_holder_t",
+      "iceberg.tables.dynamic-enabled": "false",
+      "write.upsert.enabled": "false",
+      "iceberg.control.commit.interval-ms": "60000",
+      "consumer.max.poll.records": "5000",
+      "iceberg.catalog.type": "rest",
+      "iceberg.catalog.uri": "https://ibm-lh-presto-svc:8180/mds/iceberg",
+      "iceberg.catalog.warehouse": "iceberg_data",      
+      "iceberg.catalog.client.region": "none",
+      "iceberg.catalog.s3.endpoint": "http://ibm-lh-presto-svc:9000",
+      "iceberg.catalog.s3.path-style-access": "true",
+      "iceberg.catalog.s3.access-key-id": "f33150f834d9a8b2435474f6",
+      "iceberg.catalog.s3.secret-access-key": "fdd7d613b2c72d07c3618ae6",
+  	   "iceberg.catalog.rest.auth.type": "basic",
+      "iceberg.catalog.rest.auth.basic.username": "admin",
+      "iceberg.catalog.rest.auth.basic.password": "abc123abc123!",
+      "value.converter": "io.confluent.connect.avro.AvroConverter",
+      "value.converter.schema.registry.url": "http://schema-registry-1:8081",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter"
+	}'
+```
+
+## 09 - Curation Card Holder Data
 
 ```
 import os
@@ -987,14 +1278,13 @@ spark = (
                 "org.apache.iceberg:iceberg-aws-bundle:1.10.1")
 
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio-1:9000")
+        .config("spark.hadoop.fs.s3a.endpoint", "http://ibm-lh-presto-svc:9000")
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.access.key", accessKey)
-        .config("spark.hadoop.fs.s3a.secret.key", secretKey)
+        .config("spark.hadoop.fs.s3a.access.key", "f33150f834d9a8b2435474f6")
+        .config("spark.hadoop.fs.s3a.secret.key", "fdd7d613b2c72d07c3618ae6")
         .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
 
-    
-        # Iceberg catalog
+        # ==== Iceberg catalog (local) ===
         .config("spark.sql.catalog.hiverest", "org.apache.iceberg.spark.SparkCatalog")
         .config("spark.sql.catalog.hiverest.type", "rest")
         .config("spark.sql.catalog.hiverest.uri", "http://hive-metastore:9084/iceberg")
@@ -1006,8 +1296,36 @@ spark = (
         .config("spark.sql.catalog.hiverest.s3.path-style-access", "true")
         .config("spark.sql.catalog.hiverest.s3.access-key-id", accessKey)
         .config("spark.sql.catalog.hiverest.s3.secret-access-key", secretKey)
+    
+        # ==== Iceberg catalog (watson) ===
+        .config("spark.sql.catalog.watson", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.watson.type", "rest")
+        .config("spark.sql.catalog.watson.uri", "https://ibm-lh-presto-svc:8180/mds/iceberg")
+        .config("spark.sql.catalog.watson.rest.auth.type", "basic")
+        .config("spark.sql.catalog.watson.rest.auth.basic.username", "ibmlhadmin")
+        .config("spark.sql.catalog.watson.rest.auth.basic.password", "password")    
+        .config("spark.sql.catalog.watson.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        .config("spark.sql.catalog.watson.warehouse", "iceberg_data")
 
+        # ⭐ REQUIRED FOR MINIO WITH ICEBERG AWS SDK
+        .config("spark.sql.catalog.watson.s3.endpoint", "http://ibm-lh-presto-svc:9000")
+        .config("spark.sql.catalog.watson.s3.path-style-access", "true")
+        .config("spark.sql.catalog.watson.s3.access-key-id", "f33150f834d9a8b2435474f6")
+        .config("spark.sql.catalog.watson.s3.secret-access-key", "fdd7d613b2c72d07c3618ae6")
+
+        # use "hiverest" for local setup, "watson" for the watsonx developer setup
         .config("spark.sql.defaultCatalog", "hiverest")
+
+        .config(
+            "spark.driver.extraJavaOptions",
+            "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks " +
+            "-Djavax.net.ssl.trustStorePassword=changeit"
+        )
+        .config(
+            "spark.executor.extraJavaOptions",
+            "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks " +
+            "-Djavax.net.ssl.trustStorePassword=changeit"
+        )
 
         .config(
             "spark.sql.extensions",
@@ -1049,6 +1367,14 @@ CREATE TABLE customer_db.cur_address_t (
     zip_code STRING,
     city STRING,
     state STRING
+);
+
+CREATE TABLE customer_db.cur_card_t (
+    card_id STRING,
+    person_id STRING,
+    card_number STRING,
+    card_type STRING,
+    expiry_date STRING
 );
 ```
 
@@ -1118,6 +1444,26 @@ WHEN NOT MATCHED THEN INSERT *
 ```
 
 ```
+spark.sql(f"""
+MERGE INTO customer_db.cur_card_t t
+USING (
+  SELECT
+    sha2(concat(card_holder.id,'card'),256) AS card_id,
+    card_holder.id AS person_id,
+    card_holder.card.number AS card_number,
+    card_holder.card.type AS card_type,
+    card_holder.card.expiry_date AS expiry_date
+  FROM {source_table}
+  WHERE card_holder.card IS NOT NULL
+) s
+ON t.card_id = s.card_id
+
+WHEN MATCHED THEN UPDATE SET *
+WHEN NOT MATCHED THEN INSERT *
+""")
+```
+
+```
 %%sql
 SELECT card_holder.id, count(*)
 FROM customer_db.raw_card_holder_t
@@ -1125,9 +1471,9 @@ GROUP BY card_holder.id
 HAVING COUNT(*) > 1
 ```
 
-## 99 - Cities data for geo-location enrichment
+## 10 - Cities data for geo-location enrichment
 
-First upload `data/cities1000.txt` to `s3a://landing-bucket/geonames`
+First upload `data/cities1000.txt` to `s3a://landing-bucket/geonames` in local minio
 
 ```python
 import os
@@ -1143,18 +1489,16 @@ spark = (
 
         .config("spark.jars.packages",
                 "org.apache.iceberg:iceberg-spark-runtime-4.0_2.13:1.10.1,"
-                "org.apache.iceberg:iceberg-aws-bundle:1.10.1,"
-                "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.1")
+                "org.apache.iceberg:iceberg-aws-bundle:1.10.1")
 
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio-1:9000")
+        .config("spark.hadoop.fs.s3a.endpoint", "http://ibm-lh-presto-svc:9000")
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.access.key", accessKey)
-        .config("spark.hadoop.fs.s3a.secret.key", secretKey)
+        .config("spark.hadoop.fs.s3a.access.key", "f33150f834d9a8b2435474f6")
+        .config("spark.hadoop.fs.s3a.secret.key", "fdd7d613b2c72d07c3618ae6")
         .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
 
-    
-        # Iceberg catalog
+        # ==== Iceberg catalog (local) ===
         .config("spark.sql.catalog.hiverest", "org.apache.iceberg.spark.SparkCatalog")
         .config("spark.sql.catalog.hiverest.type", "rest")
         .config("spark.sql.catalog.hiverest.uri", "http://hive-metastore:9084/iceberg")
@@ -1166,8 +1510,36 @@ spark = (
         .config("spark.sql.catalog.hiverest.s3.path-style-access", "true")
         .config("spark.sql.catalog.hiverest.s3.access-key-id", accessKey)
         .config("spark.sql.catalog.hiverest.s3.secret-access-key", secretKey)
+    
+        # ==== Iceberg catalog (watson) ===
+        .config("spark.sql.catalog.watson", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.watson.type", "rest")
+        .config("spark.sql.catalog.watson.uri", "https://ibm-lh-presto-svc:8180/mds/iceberg")
+        .config("spark.sql.catalog.watson.rest.auth.type", "basic")
+        .config("spark.sql.catalog.watson.rest.auth.basic.username", "ibmlhadmin")
+        .config("spark.sql.catalog.watson.rest.auth.basic.password", "password")    
+        .config("spark.sql.catalog.watson.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        .config("spark.sql.catalog.watson.warehouse", "iceberg_data")
 
+        # ⭐ REQUIRED FOR MINIO WITH ICEBERG AWS SDK
+        .config("spark.sql.catalog.watson.s3.endpoint", "http://ibm-lh-presto-svc:9000")
+        .config("spark.sql.catalog.watson.s3.path-style-access", "true")
+        .config("spark.sql.catalog.watson.s3.access-key-id", "f33150f834d9a8b2435474f6")
+        .config("spark.sql.catalog.watson.s3.secret-access-key", "fdd7d613b2c72d07c3618ae6")
+
+        # use "hiverest" for local setup, "watson" for the watsonx developer setup
         .config("spark.sql.defaultCatalog", "hiverest")
+
+        .config(
+            "spark.driver.extraJavaOptions",
+            "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks " +
+            "-Djavax.net.ssl.trustStorePassword=changeit"
+        )
+        .config(
+            "spark.executor.extraJavaOptions",
+            "-Djavax.net.ssl.trustStore=/data-transfer/truststore.jks " +
+            "-Djavax.net.ssl.trustStorePassword=changeit"
+        )
 
         .config(
             "spark.sql.extensions",
@@ -1233,6 +1605,3 @@ kafka_df.write \
     .save()
 ```
 
-## Presto
-
-![](https://prestodb.io/wp-content/uploads/presto-ecosystem-diagram.png)
