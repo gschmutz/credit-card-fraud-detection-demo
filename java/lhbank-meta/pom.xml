@@ -70,7 +70,7 @@
                         <param>http://dataplatform:8081</param>
                     </schemaRegistryUrls>
                     <subjects>
-                        <pub.crm.cardHolder.state.v1-value>target/generated-sources/avro/schema/customer/state/CardHolderState.avsc</pub.crm.cardHolder.state.v1-value>
+                        <pub.cus.cardHolder.state.v1-value>target/generated-sources/avro/schema/customer/state/CardHolderState.avsc</pub.cus.cardHolder.state.v1-value>
                     </subjects>
                 </configuration>
                 <goals>

@@ -1,10 +1,10 @@
-POST 192.168.1.112:29000/api/cardHolders
+POST localhost:29000/api/cardHolders
 Content-Type: application/json
 
 {
-  "id": "cad4e633-d23e-9e95-97bb-909e7fa82e7d",
-  "firstName": "Angelyn",
-  "lastName": "Dibbert",
+  "id": "cad4e633-d23e-9e95-97bc-909e7fa83e7q",
+  "firstName": "Peter",
+  "lastName": "Muster",
   "emailAddress": "cher.turner@hotmail.com",
   "phoneNumber": "+1 413-925-9346",
   "preferredContact": "phone",

@@ -249,7 +249,7 @@
         {
             "name": "genCardTransactions",
             "connection": "kafka",
-            "topic": "priv.payment.transaction.delta.v1",
+            "topic": "priv.pay.transaction.delta.v1",
             "vars": {
                 "card_number": {
                     "_gen": "lookup",
