@@ -3,6 +3,11 @@ services:
     image: gschmutz/lhbank-cardholder:0.0.1
     container_name: lhbank-cardholder-app
     hostname: lhbank-cardholder-app
+    labels:
+      com.platys.name: none
+      com.platys.description: CardHolder Spring Boot Application
+      com.platys.restapi.title: Spark UI
+      com.platys.restapi.url: http://dataplatform:29000    
     depends_on:
       postgresql:
        condition: service_healthy
@@ -36,3 +41,9 @@ services:
       SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_s3_path___style___access: true
       SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_s3_access___key___id: f33150f834d9a8b2435474f6
       SPARK_DEFAULTS_CONF_spark_sql_catalog_watson_s3_secret___access___key: fdd7d613b2c72d07c3618ae6
+
+  presto-1:
+    environment:
+      POSTGRESQL_DATABASE: customer_db
+      POSTGRESQL_USER: customer
+      POSTGRESQL_PASSWORD: abc123!
