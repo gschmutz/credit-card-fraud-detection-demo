@@ -21,6 +21,8 @@ docker compose up -d
 
 ### Start simulator
 
+Traffic is generated using [ShadowTraffic](https://shadowtraffic.io/). It needs to be started separately once the stack is up and running.
+
 ```bash
 docker compose --profile test up -d
 ```
