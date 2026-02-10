@@ -341,7 +341,7 @@ LEFT JOIN ref_geonames_t g
 EMIT CHANGES;
 ```
 
-## 02 - Write Transactions as Iceberg tables to S3 Object Storage using Kafka Connect
+## 02 - Write Transaction data as Iceberg tables to S3 Object Storage using Kafka Connect
 
 What is file format? and what is a table format?
 
@@ -349,7 +349,7 @@ What is file format? and what is a table format?
 
 We are using [Apache Iceberg](https://iceberg.apache.org/) table format in this demo.
 
-### Preopare the Raw Transactions Iceberg table
+### Prepare the Raw Transactions Iceberg table
 
 #### Using Spark SQL to create the table
 
@@ -357,9 +357,8 @@ We are using [Apache Iceberg](https://iceberg.apache.org/) table format in this 
 docker exec -ti spark-master spark-sql
 ```
 
-change `hiverest` to `watson` to connect to WatsonX developer edition. 
-
 ```sql
+# change `hiverest` to `watson` to connect to WatsonX developer edition. 
 use hiverest;
 
 CREATE DATABASE payment_db
@@ -391,9 +390,15 @@ docker exec -ti minio-mc mc mb minio-1/iceberg-bucket
 
 ![](./images/iceberg.png)
 
+For the Iceberg catalog, the local platform is using a Hive Meta Store 4.x configured with Iceberg REST API
+
+![](https://hive.apache.org/docs/latest/admin/images/hive-iceberg-rest-integration.png)
+
+In WatsonX, the Iceberg catalog is provided by Metastore Service (MDS) which offers a Iceberg REST API as well as a Hive Metastore compatible API (HMS Thrift) 
+
 ![](https://miro.medium.com/1*SMdZ5hwl0eIkY6h61jsOOA.png)
 
-#### Kafka Connect (local) - write to `payment_db.raw_transaction_t`
+### Using Kafka Connect with the Iceberg connector
 
 ![](./images/kafka-connect.png)
 
@@ -410,7 +415,10 @@ Create the `control-iceberg` control topic, needed for the Kafka Connect [Iceber
 ```bash
 docker exec -it kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic control-iceberg --partitions 1 --replication-factor 3
 ```
-#### Kafka Connect (Local)
+
+#### Write to `payment_db.raw_transaction_t`
+
+**Kafka Connect (Local)**
 
 ```bash
 curl -X PUT \
@@ -440,7 +448,7 @@ curl -X PUT \
 	}'
 ```
 
-#### Kafka Connect (Watson.x Data)
+**Kafka Connect (Watson.x Data)**
 
 ```
 curl -X PUT \
@@ -473,7 +481,7 @@ curl -X PUT \
 	}'
 ```
 
-### Flagged Transactions to Iceberg
+#### Write to `payment_db.raw_transaction_flagged_t`
 
 ```bash
 docker exec -ti spark-master spark-sql
@@ -481,6 +489,7 @@ docker exec -ti spark-master spark-sql
 
 ```sql
 # either use `hiverest` or `watson`
+use hiverest
 
 DROP TABLE IF EXISTS payment_db.raw_transaction_flagged_t;
 
@@ -531,7 +540,7 @@ curl -X PUT \
 
 ```bash
 curl -X PUT \
-  http://$DATAPLATFORM_IP:8083/connectors/pay-transaction-flagged-enriched-kafka-to-s3/config \
+  http://$DATAPLATFORM_IP:8083/connectors/IBM-pay-transaction-flagged-enriched-kafka-to-s3/config \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
   -d '{
@@ -569,6 +578,7 @@ docker exec -ti spark-master spark-sql
 ```
 
 ```
+# either use `hiverest` or `watson`
 use hiverest;
 SELECT * FROM payment_db.raw_transaction_t;
 ```
@@ -679,6 +689,7 @@ docker exec -ti spark-master spark-sql
 
 ```sql
 # either use `hiverest` or `watson`
+use hiverest
 
 CREATE DATABASE IF NOT EXISTS refdata_db
 LOCATION 's3a://iceberg-bucket/refdata_db';
@@ -726,7 +737,7 @@ curl -X PUT \
 
 ```bash
 curl -X PUT \
-  http://$DATAPLATFORM_IP:8083/connectors/ref-merchant-kafka-to-s3/config \
+  http://$DATAPLATFORM_IP:8083/connectors/IBM_ref-merchant-kafka-to-s3/config \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
   -d '{
@@ -937,6 +948,11 @@ result_df.write.format("iceberg") \
 ```sql
 %%sql
 SELECT * FROM payment_db.cur_transaction_with_merchant_t
+```
+
+```
+%%sql
+show tables in payment_db
 ```
 
 ## 06 - Using Presto to query and curate
