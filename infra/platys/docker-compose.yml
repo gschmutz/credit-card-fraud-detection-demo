@@ -216,7 +216,7 @@ services:
       - |
         echo "Installing Connectors"
         mkdir -p /etc/kafka-connect/cflthub-plugins
-        for i in $$(echo "confluentinc/kafka-connect-jdbc:10.8.4,debezium/debezium-connector-postgresql:3.1.2,debezium/debezium-connector-mysql:3.1.2,confluentinc/kafka-connect-s3:11.0.0" | sed "s/,/ /g")
+        for i in $$(echo "confluentinc/kafka-connect-jdbc:10.8.4,debezium/debezium-connector-postgresql:3.1.2,debezium/debezium-connector-mysql:3.1.2,confluentinc/kafka-connect-s3:11.0.0,confluentinc/kafka-connect-elasticsearch:15.1.1" | sed "s/,/ /g")
         do
           confluent-hub install --no-prompt --component-dir /etc/kafka-connect/cflthub-plugins --verbose "$$i"
         done
@@ -576,74 +576,6 @@ services:
       timeout: 10s
       retries: 10
       start_period: 20s
-  spark-thriftserver:
-    image: bitnamilegacy/spark:3.5.3
-    container_name: spark-thriftserver
-    hostname: spark-thriftserver
-    labels:
-      com.platys.name: spark-thriftserver
-      com.platys.description: Spark Thriftserver
-      com.platys.webui.title: Spark Thriftserver UI
-      com.platys.webui.url: http://dataplatform:28298
-    depends_on:
-      spark-master:
-        condition: service_healthy
-    ports:
-      - 28118:10000
-      - 28298:4040
-    environment:
-      SPARK_MASTER_URL: local[*]
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_impl: org.apache.hadoop.fs.s3a.S3AFileSystem
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_endpoint: http://minio-1:9000
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_access_key: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_secret_key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_path_style_access: 'true'
-      AWS_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      AWS_SECRET_ACCESS_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_defaultFS: s3a://admin-bucket
-      SPARK_DEFAULTS_CONF_spark_sql_warehouse_dir: s3a://admin-bucket/hive/warehouse
-      SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_jars: builtin
-      # SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_version: 3.1.2    
-      SPARK_DEFAULTS_CONF_spark_sql_catalogImplementation: in-memory
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_spark__catalog: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions,
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive_type: hive
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive_uri: thrift://hive-metastore:9083
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive_warehouse: s3a://admin-bucket/iceberg/warehouse
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_type: rest
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_uri: http://hive-metastore:9084/iceberg
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_token: not_used
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_warehouse: s3a://admin-bucket/iceberg/warehouse
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_io___impl: org.apache.iceberg.aws.s3.S3FileIO
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_s3_endpoint: http://minio-1:9000
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_s3_path___style___access: true
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_s3_access___key___id: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
-      SPARK_DEFAULTS_CONF_spark_driver_extraJavaOptions:
-      SPARK_DEFAULTS_CONF_spark_executor_extraJavaOptions:
-      SPARK_DEFAULTS_CONF_spark_jars_repositories:
-      SPARK_DEFAULTS_CONF_spark_jars_packages: ''
-      SPARK_DEFAULTS_CONF_spark_jars_excludes:
-      # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
-      SPARK_INSTALL_JARS_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
-      SPARK_DEFAULTS_CONF_spark_jars: /opt/bitnami/spark/jars/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
-      SPARK_DEFAULTS_CONF_spark_jars_ivySettings:
-    volumes:
-      - ./data-transfer:/data-transfer
-      # the 3 conf files are mapped to conf.default folder, they are copied with env variable interpolation into conf upon start of container
-      - ./conf/spark/hive-site.xml:/opt/bitnami/spark/conf.default/hive-site.xml
-      - ./conf/spark/spark-defaults.conf:/opt/bitnami/spark/conf.default/spark-defaults.conf
-      - ./init/spark:/docker-entrypoint-initdb.d
-      # we override the run.sh script to start thriftserver instead of master/worker
-      - ./scripts/spark/run-thriftserver.sh:/opt/bitnami/scripts/spark/run.sh
-      - ./scripts/docker/maven-download.sh:/maven-download.sh
-      - ./container-volume/spark/logs/:/var/log/spark/logs
-      - ./scripts/docker/wait-for-it.sh:/usr/src/app/wait-for-it.sh
-    restart: unless-stopped
   #  ================================== Apache Hive Metastore ========================================== #
   hive-metastore:
     image: trivadis/apache-hive:4.2.0-postgresql-standalone-metastore-s3
@@ -765,6 +697,44 @@ services:
         pip install pyspark==4.1.1 jupysql protobuf==6.33.0 boto3
         start-notebook.sh
     restart: unless-stopped
+  #  ================================== Elasticsearch ========================================== #
+  elasticsearch-1:
+    image: elasticsearch:8.19.10
+    hostname: elasticsearch-1
+    container_name: elasticsearch-1
+    labels:
+      com.platys.name: elasticsearch
+      com.platys.description: Search-engine NoSQL store
+      com.platys.restapi.title: Elasticsearch REST API
+      com.platys.restapi.url: http://dataplatform:9200
+      com.platys.manual.step.msgs: sudo sysctl -w vm.max_map_count=262144
+    ports:
+      - 9200:9200
+      - 9300:9300
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: false
+      xpack.monitoring.collection.enabled: 'false'
+      xpack.security.http.ssl.enabled: false
+      xpack.security.transport.ssl.enabled: false
+      http.cors.enabled: 'true'
+      http.cors.allow-origin: http://${DOCKER_HOST_IP}:28275,http://${PUBLIC_IP}:28275,http://dejavu:1358,http://dataplatform:28125,http://dataplatform:28125,http://${PUBLIC_IP}:28125,http://${DOCKER_HOST_IP}:28125,http://127.0.0.1:1358
+      http.cors.allow-headers: X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization
+      http.cors.allow-credentials: 'true'
+      cluster.routing.allocation.disk.threshold_enabled: 'true'
+      cluster.routing.allocation.disk.watermark.low: 2gb
+      cluster.routing.allocation.disk.watermark.high: 1gb
+      cluster.routing.allocation.disk.watermark.flood_stage: 512mb
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - ./data-transfer:/data-transfer
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -s http://localhost:9200/_cat/health?h=status | grep -q green
+      retries: 300
+      interval: 10s
   #  ================================== Prometheus ========================================== #
   prometheus-1:
     image: prom/prometheus:v3.9.1
@@ -873,6 +843,7 @@ services:
       - ./conf/presto/catalog/iceberg-hive.properties:/opt/presto-server/etc/catalog/iceberg_hive.properties
       - ./conf/presto/catalog/iceberg-hive-rest.properties:/opt/presto-server/etc/catalog/iceberg_hive_rest.properties
       - ./conf/presto/catalog/postgresql.properties:/opt/presto-server/etc/catalog/postgresql.properties
+      - ./conf/presto/catalog/elasticsearch.properties:/opt/presto-server/etc/catalog/elasticsearch.properties
       - ./conf/presto/catalog/prometheus.properties:/opt/presto-server/etc/catalog/prometheus.properties
     restart: unless-stopped
   #  ================================== Minio ========================================== #
@@ -990,6 +961,7 @@ services:
       - ./scripts/grafana/dashboards/kafka/kafka-stream.json:/etc/grafana/provisioning/dashboards/kafka/kafka-stream.json
       - ./scripts/grafana/dashboards/kafka/kafka-streams-rocksdb.json:/etc/grafana/provisioning/dashboards/kafka/kafka-streams-rocksdb.json
       - ./scripts/grafana/dashboards/kafka/OTel_kafkametrics.json:/etc/grafana/provisioning/dashboards/kafka/OTel_kafkametrics.json
+      - ./scripts/grafana/dashboards/elasticsearch:/etc/grafana/provisioning/dashboards/elasticsearch
       - ./scripts/grafana/dashboards/postgresql:/etc/grafana/provisioning/dashboards/postgresql
       - ./scripts/grafana/dashboards/minio:/etc/grafana/provisioning/dashboards/minio
       - ./scripts/grafana/dashboards/spark:/etc/grafana/provisioning/dashboards/spark
