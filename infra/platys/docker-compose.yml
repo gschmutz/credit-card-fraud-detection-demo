@@ -463,12 +463,12 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     environment:
-      - LICENSE_ID=dbbcf90d-fc9f-40b2-bcc3-48e615dea580
-      - LICENSE_EMAIL=michael+examples@shadowtraffic.io
-      - LICENSE_ORGANIZATION=ShadowTraffic
-      - LICENSE_EDITION=ShadowTraffic Free Trial
-      - LICENSE_EXPIRATION=2026-02-26
-      - LICENSE_SIGNATURE=hWB97kIcve1gyMtks/QoiQu0B/EILqfPj+qBh2JuSbVO3vKOLJuPljVGstx9Gb8ay7CGdGwoPWYIOkgsWw1fh0xYROtGRWYeQu40n4EZ+wC8JzXXrOxFyRZGB1yWIiJwkX/5/AGvN3BOtkbFukzuJKyIh4fJp82HgbR/B7JcwM+Ht7RSL9YqWbT3YTr8IRhzlDSyllw5d94v9s0G2ALVk+/nwsFpubQKUHSmChUUtkhrnX71Nt/Yvynu5JYw3ntK8I6GutQpIoi6y7dvvziFAxtovcLppY3hBsAgW/tw+PAm1JAgte+n4Rf6vVOYDArFWhqT1YfbOsJCbidHjEHMAg==
+      - LICENSE_ID=${PLATYS_SHADOW_TRAFFIC_LICENSE_ID:-dbbcf90d-fc9f-40b2-bcc3-48e615dea580}
+      - LICENSE_EMAIL=${PLATYS_SHADOW_TRAFFIC_LICENSE_EMAIL:-michael+examples@shadowtraffic.io}
+      - LICENSE_ORGANIZATION=${PLATYS_SHADOW_TRAFFIC_LICENSE_ORGANIZATION:-ShadowTraffic}
+      - LICENSE_EDITION=${PLATYS_SHADOW_TRAFFIC_LICENSE_EDITION:-ShadowTraffic Free Trial}
+      - LICENSE_EXPIRATION=${PLATYS_SHADOW_TRAFFIC_LICENSE_EXPIRATION:-2026-02-26}
+      - LICENSE_SIGNATURE=${PLATYS_SHADOW_TRAFFIC_LICENSE_SIGNATURE:-hWB97kIcve1gyMtks/QoiQu0B/EILqfPj+qBh2JuSbVO3vKOLJuPljVGstx9Gb8ay7CGdGwoPWYIOkgsWw1fh0xYROtGRWYeQu40n4EZ+wC8JzXXrOxFyRZGB1yWIiJwkX/5/AGvN3BOtkbFukzuJKyIh4fJp82HgbR/B7JcwM+Ht7RSL9YqWbT3YTr8IRhzlDSyllw5d94v9s0G2ALVk+/nwsFpubQKUHSmChUUtkhrnX71Nt/Yvynu5JYw3ntK8I6GutQpIoi6y7dvvziFAxtovcLppY3hBsAgW/tw+PAm1JAgte+n4Rf6vVOYDArFWhqT1YfbOsJCbidHjEHMAg==}
       - KAFKA_BOOTSTRAP_SERVERS=kafka-1:19092,kafka-2:19093,kafka-3:19094
       - KAFKA_SCHEMA_REGISTRY_URL=http://schema-registry-1:8081
       - POSTGRESQL_HOST=postgresql
