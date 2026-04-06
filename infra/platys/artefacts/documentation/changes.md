@@ -2,6 +2,45 @@
 
 See [Upgrade to a new platform stack version](https://github.com/TrivadisPF/platys/blob/master/documentation/upgrade-platform-stack) for how to upgrade to newer version.
 
+## What's new in 1.20.0
+
+### New Services
+
+ * OpenClaw
+ * AutoMQ
+ * Moat
+ * RustFS
+ * Lightdash
+ * Minio Aistor
+
+### Version upgrades
+
+ * Update `langflow` to `1.7.3`
+ * Update `n8n` to `2.7.5`
+ * Update `ollama` to `0.16.3`
+ * Update `opa` to `1.14.0` 
+ * Update `opal` to `0.9.3`
+ * Update `starburstdata` to `479-e`
+ * Update `n8n` to `2.11.4`
+ * Update `starburst` to `479-e.3`
+ * Update `fluss` to `0.9.0-incubating`
+ * Update `zeppelin` to `0.12.0`
+ * Update `lakefs` to `1.80`
+ * Update `trino` to `480`
+
+### Enhancements
+
+ * add default values for environment variables `PUBLIC_IP=127.0.0.1` and `DOCKER_HOST_IP=localhost`
+ * change docker image for the iceberg rest service from `tabulario/iceberg-rest` to `apache/iceberg-rest-fixture`
+ * add aistor as an editon of Minio
+ 
+### Breaking Changes
+ 
+ * rename `SPARK_install_jars_packages` to `SPARK_install_java_packages`
+
+### Bug Fixes
+
+
 ## What's new in 1.19.1
 
 ### New Services
@@ -12,6 +51,8 @@ See [Upgrade to a new platform stack version](https://github.com/TrivadisPF/plat
 
  * Update `openmetadata` to `1.11.6` 
  * Update `datahub` to `v1.4.0-preview`
+ * Update `langflow` to `1.7.3`
+ * Update `n8n` to `2.7.5`
 
 ### Enhancements
 

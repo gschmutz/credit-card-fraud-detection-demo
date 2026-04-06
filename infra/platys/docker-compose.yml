@@ -516,7 +516,7 @@ services:
       SPARK_SSL_ENABLED: no
       # spark standard env vars
       SPARK_MASTER_WEBUI_PORT: 28304
-      SPARK_PUBLIC_DNS: ${PUBLIC_IP}
+      SPARK_PUBLIC_DNS: ${PUBLIC_IP:-127.0.0.1}
       # env vars for config files
 #     INIT_DAEMON_STEP: setup_spark
       SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_impl: org.apache.hadoop.fs.s3a.S3AFileSystem
@@ -534,28 +534,14 @@ services:
       SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_jars: builtin
       # SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_version: 3.1.2    
       SPARK_DEFAULTS_CONF_spark_sql_catalogImplementation: in-memory
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_spark__catalog: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions,
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive_uri: thrift://hive-metastore:9083
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive_warehouse: s3a://admin-bucket/iceberg/warehouse
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_type: rest
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_uri: http://hive-metastore:9084/iceberg
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_token: not_used
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_warehouse: s3a://admin-bucket/iceberg/warehouse
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_io___impl: org.apache.iceberg.aws.s3.S3FileIO
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_s3_endpoint: http://minio-1:9000
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_s3_path___style___access: true
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_s3_access___key___id: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hiverest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
       SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
       SPARK_DEFAULTS_CONF_spark_jars_repositories:
-      SPARK_DEFAULTS_CONF_spark_jars_packages: ''
+      SPARK_DEFAULTS_CONF_spark_jars_packages: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2'
       SPARK_DEFAULTS_CONF_spark_jars_excludes:
       # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
-      SPARK_INSTALL_JARS_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
-      SPARK_DEFAULTS_CONF_spark_jars: /opt/bitnami/spark/jars/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+      SPARK_INSTALL_JAVA_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
+      SPARK_INSTALL_PYTHON_PACKAGES: ' delta-spark==3.3.2'
+      SPARK_DEFAULTS_CONF_spark_jars:
       SPARK_DEFAULTS_CONF_spark_jars_ivySettings:
     volumes:
       - ./data-transfer:/data-transfer
@@ -689,11 +675,11 @@ services:
       - bash
       - -c
       - |
-        #conda create -y --name py312 python=3.12.8
-        #source /opt/conda/etc/profile.d/conda.sh
-        #conda activate py312
-        #pip install ipykernel    
-        #python -m ipykernel install --user --name py312 --display-name "Python 3.12.8 (ipykernel)"
+        conda create -y --name py312 python=3.12.8
+        source /opt/conda/etc/profile.d/conda.sh
+        conda activate py312
+        pip install ipykernel    
+        python -m ipykernel install --user --name py312 --display-name "Python 3.12.8 (ipykernel)"
         pip install pyspark==4.1.1 jupysql protobuf==6.33.0 boto3
         start-notebook.sh
     restart: unless-stopped
@@ -718,7 +704,7 @@ services:
       xpack.security.http.ssl.enabled: false
       xpack.security.transport.ssl.enabled: false
       http.cors.enabled: 'true'
-      http.cors.allow-origin: http://${DOCKER_HOST_IP}:28275,http://${PUBLIC_IP}:28275,http://dejavu:1358,http://dataplatform:28125,http://dataplatform:28125,http://${PUBLIC_IP}:28125,http://${DOCKER_HOST_IP}:28125,http://127.0.0.1:1358
+      http.cors.allow-origin: http://${DOCKER_HOST_IP:-localhost}:28275,http://${PUBLIC_IP:-127.0.0.1}:28275,http://dejavu:1358,http://dataplatform:28125,http://dataplatform:28125,http://${PUBLIC_IP:-127.0.0.1}:28125,http://${DOCKER_HOST_IP:-localhost}:28125,http://127.0.0.1:1358
       http.cors.allow-headers: X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization
       http.cors.allow-credentials: 'true'
       cluster.routing.allocation.disk.threshold_enabled: 'true'
@@ -840,8 +826,6 @@ services:
       - ./conf/presto/single/config.properties:/opt/presto-server/etc/config.properties
       - ./conf/presto/single/node.properties:/opt/presto-server/etc/node.properties
       - ./conf/presto/catalog/minio.properties:/opt/presto-server/etc/catalog/minio.properties
-      - ./conf/presto/catalog/iceberg-hive.properties:/opt/presto-server/etc/catalog/iceberg_hive.properties
-      - ./conf/presto/catalog/iceberg-hive-rest.properties:/opt/presto-server/etc/catalog/iceberg_hive_rest.properties
       - ./conf/presto/catalog/postgresql.properties:/opt/presto-server/etc/catalog/postgresql.properties
       - ./conf/presto/catalog/elasticsearch.properties:/opt/presto-server/etc/catalog/elasticsearch.properties
       - ./conf/presto/catalog/prometheus.properties:/opt/presto-server/etc/catalog/prometheus.properties
@@ -856,7 +840,7 @@ services:
       com.platys.description: Software-defined Object Storage
       com.platys.webui.title: MinIO UI
       com.platys.webui.url: http://dataplatform:9010
-      com.platys.password.envvars: PLATYS_AWS_SECRET_ACCESS_KEY
+      com.platys.password.envvars: 'PLATYS_AWS_SECRET_ACCESS_KEY, '
     ports:
       # S3 API Port
       - 9000:9000
@@ -869,13 +853,18 @@ services:
       #MINIO_REGION_NAME: us-east-1
       #MINIO_REGION: us-east-1
       MINIO_DOMAIN: minio
-      MINIO_SERVER_URL: http://${PUBLIC_IP}:9000
+      MINIO_SERVER_URL: http://${PUBLIC_IP:-127.0.0.1}:9000
       MINIO_COMPRESSION_ENABLE: off
       MINIO_PROMETHEUS_AUTH_TYPE: public
       MINIO_PROMETHEUS_URL: http://prometheus-1:9090
     volumes:
       - ./data-transfer:/data-transfer
-    command: server /data --console-address ":9010"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /root/.minio && echo "$$MINIO_LICENSE" > /root/.minio/minio.license && exec /usr/bin/docker-entrypoint.sh "$$@"
+    command: minio server /data --console-address ":9010"
     restart: unless-stopped
     healthcheck:
       test: [CMD, curl, -f, http://minio-1:9000/minio/health/live]
@@ -898,15 +887,11 @@ services:
     volumes:
       - ./data-transfer:/data-transfer
       - ./scripts/docker/wait-for-it.sh:/usr/src/app/wait-for-it.sh
-      - ./security/aws/credentials:/tmp/credentials.templ
-      - aws-credentials-vol:/tmp/.aws:RO
     entrypoint:
       - /bin/sh
       - -c
       - |
         /usr/src/app/wait-for-it.sh -t 180 minio-1:9000
-        mkdir -p /tmp/.aws
-        eval "echo \"$$(cat /tmp/credentials.templ)\"" >> /tmp/.aws/credentials
         mc mb --ignore-existing minio-1/admin-bucket
               for bucket in $$(tr ',' '\n' <<< "iceberg-bucket,hive-bucket,landing-bucket")
         do
@@ -1007,8 +992,8 @@ services:
       com.platys.description: Platys Platform homepage rendering
     environment:
       USE_PUBLIC_IP: 'True'
-      PUBLIC_IP: ${PUBLIC_IP}
-      DOCKER_HOST_IP: ${DOCKER_HOST_IP}
+      PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
+      DOCKER_HOST_IP: ${DOCKER_HOST_IP:-localhost}
       DATAPLATFORM_HOME: ${DATAPLATFORM_HOME}
       PLATYS_PLATFORM_NAME: platys-platform
       PLATYS_PLATFORM_STACK: trivadis/platys-modern-data-platform
@@ -1026,6 +1011,5 @@ services:
 volumes:
   data-transfer-vol:
     name: data_transfer_vol
-  aws-credentials-vol:
   spark-3-5-3-vol:
   spark-3-5-3-java-vol:

@@ -1,4 +1,4 @@
-# `modern-data-platform` - Port Mappings - 1.19.1
+# `modern-data-platform` - Port Mappings - 1.20.0
 
 This table reserves the external ports for the various services. Not all services have to be used in the platform at a given time. But by reserving, we can assure that there are no conflicts if a service is added at a later time.
 
@@ -283,11 +283,13 @@ Container Port(s) | Internal Port(s)           | Service (alternatives) |
 9001 | 9000 | minio-2 |
 9002 | 9000 | minio-3 |
 9003 | 9000 | minio-4 |
+9005 | 9000 | rustfs-1 |
 9009 | 9009 | questdb |
 9010 | 9010 | minio-1 ui |
 9011 | 9011 | minio-2 ui |
 9012 | 9012 | minio-3 ui |
 9013 | 9013 | minio-4 ui |
+9014 | 9001 | rustfs-1 ui |
 9042 | 9042 | dse-1 |
 9043 | 9042 | dse-2 |
 9044 | 9042 | dse-3 |
@@ -335,6 +337,9 @@ Container Port(s) | Internal Port(s)           | Service (alternatives) |
 9412 | 9412 | jaeger |
 9413 | 9413 | pitchfork |
 9443 | 9443 | lfh-fhir |
+9492 | 9492 | automq-1     |
+9493 | 9493 | automq-2     |
+9494 | 9494 | automq-3     |
 9600 | 9600 | zeebe-1 |
 9601 | 9600 | langwatch-opensearch  |
 9851 | 9851 | tile38 |
@@ -789,6 +794,8 @@ Container Port(s) | Internal Port(s)           | Service (alternatives) |
 28419 | 8080 | data-product-portal-nginx |
 28420 | 8080 | sftpgo (webui) |
 28421 | 8000 | timeplus (enterprise) |
+28422 | 8080 | lightdash |
+28423 | 3000 | browserless |
 28242 | 3000 | openlit |
 28243 | 8123 | clickhouse |
 28244 | 9000 | clickhouse |
@@ -847,6 +854,8 @@ Container Port(s) | Internal Port(s)           | Service (alternatives) |
 28398 | 8080 | lakevision |
 28399 | 8080 | odd-platform |
 28400 | 8080 | shadowtraffic |
+28401 | 8080 | openclaw |
+28402 | 8000 | moat |
 
 ## Ports > 28500
 
