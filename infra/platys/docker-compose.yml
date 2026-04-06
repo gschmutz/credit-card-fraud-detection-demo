@@ -551,7 +551,7 @@ services:
       SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
       SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
       SPARK_DEFAULTS_CONF_spark_jars_repositories:
-      SPARK_DEFAULTS_CONF_spark_jars_packages: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2'
+      SPARK_DEFAULTS_CONF_spark_jars_packages: io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2
       SPARK_DEFAULTS_CONF_spark_jars_excludes:
       # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
       SPARK_INSTALL_JAVA_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
@@ -634,7 +634,7 @@ services:
       SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
       SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
       SPARK_DEFAULTS_CONF_spark_jars_repositories:
-      SPARK_DEFAULTS_CONF_spark_jars_packages: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2'
+      SPARK_DEFAULTS_CONF_spark_jars_packages: io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2
       SPARK_DEFAULTS_CONF_spark_jars_excludes:
       # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
       SPARK_INSTALL_JAVA_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
@@ -712,7 +712,7 @@ services:
       SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
       SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
       SPARK_DEFAULTS_CONF_spark_jars_repositories:
-      SPARK_DEFAULTS_CONF_spark_jars_packages: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2'
+      SPARK_DEFAULTS_CONF_spark_jars_packages: io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2
       SPARK_DEFAULTS_CONF_spark_jars_excludes:
       # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
       SPARK_INSTALL_JAVA_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
@@ -853,6 +853,49 @@ services:
         python -m ipykernel install --user --name py312 --display-name "Python 3.12.8 (ipykernel)"
         pip install pyspark==3.5.3 jupysql pandas arrow pyarrow grpcio-status boto3
         start-notebook.sh
+    restart: unless-stopped
+  #  ================================== Lightdash ========================================== #
+  lightdash:
+    image: lightdash/lightdash:latest
+    platform: linux/amd64
+    hostname: lightdash
+    container_name: lightdash
+    labels:
+      com.platys.name: lightdash
+      com.platys.description: Open-source BI tool for dbt and SQL
+      com.platys.webui.title: Lightdash UI
+      com.platys.webui.url: http://dataplatform:28422
+    depends_on:
+      - postgresql
+    ports:
+      - 28422:8080
+    environment:
+      LIGHTDASH_SECRET: changeme-use-a-long-random-secret-here
+      PORT: 8080
+      SECURE_COOKIES: 'false'
+      TRUST_PROXY: 'false'
+      LIGHTDASH_LOG_LEVEL: info
+      PGHOST: postgresql
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: abc123!
+      PGDATABASE: postgres
+      S3_ENDPOINT: http://rustfs-1:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      S3_SECRET_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      S3_BUCKET:
+      S3_FORCE_PATH_STYLE: 'true'
+      #S3_EXPIRATION_TIME:
+      RESULTS_S3_REGION: us-east-1
+      RESULTS_S3_BUCKET:
+      RESULTS_S3_ACCESS_KEY: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      RESULTS_S3_SECRET_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}§
+      LIGHTDASH_PROMETHEUS_ENABLED: true
+      LIGHTDASH_PROMETHEUS_PORT: 9090
+    volumes:
+      - ./data-transfer:/data-transfer
+      - ./scripts/docker/:/platys-scripts/
     restart: unless-stopped
   #  ================================== Elasticsearch ========================================== #
   elasticsearch-1:
