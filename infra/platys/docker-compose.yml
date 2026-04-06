@@ -476,7 +476,7 @@ services:
       - POSTGRESQL_DATABASE=postgres
       - POSTGRESQL_USER=postgres
       - POSTGRESQL_PASSWORD=abc123!
-      - S3_ENDPOINT=http://minio-1:9000
+      - S3_ENDPOINT=http://rustfs-1:9000
       - S3_PATH_STYLE_ACCESS='true'
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=${PLATYS_AWS_ACCESS_KEY:-admin}
@@ -520,7 +520,7 @@ services:
       # env vars for config files
 #     INIT_DAEMON_STEP: setup_spark
       SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_impl: org.apache.hadoop.fs.s3a.S3AFileSystem
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_endpoint: http://minio-1:9000
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_endpoint: http://rustfs-1:9000
       SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_access_key: ${PLATYS_AWS_ACCESS_KEY:-admin}
       SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_secret_key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
       SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_path_style_access: 'true'
@@ -534,6 +534,21 @@ services:
       SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_jars: builtin
       # SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_version: 3.1.2    
       SPARK_DEFAULTS_CONF_spark_sql_catalogImplementation: in-memory
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_spark__catalog: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions,
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg_uri: thrift://hive-metastore:9083
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg_warehouse: s3a://admin-bucket/iceberg/warehouse
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_type: rest
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_uri: http://hive-metastore:9084/iceberg
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_token: not_used
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_warehouse: s3a://admin-bucket/iceberg/warehouse
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_io___impl: org.apache.iceberg.aws.s3.S3FileIO
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_endpoint: http://rustfs-1:9000
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_path___style___access: true
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_access___key___id: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
       SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
       SPARK_DEFAULTS_CONF_spark_jars_repositories:
       SPARK_DEFAULTS_CONF_spark_jars_packages: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2'
@@ -541,7 +556,7 @@ services:
       # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
       SPARK_INSTALL_JAVA_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
       SPARK_INSTALL_PYTHON_PACKAGES: ' delta-spark==3.3.2'
-      SPARK_DEFAULTS_CONF_spark_jars:
+      SPARK_DEFAULTS_CONF_spark_jars: /opt/bitnami/spark/jars/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
       SPARK_DEFAULTS_CONF_spark_jars_ivySettings:
     volumes:
       - ./data-transfer:/data-transfer
@@ -583,7 +598,7 @@ services:
       HIVE_SITE_CONF_metastore_catalog_servlet_auth: none
       CORE_CONF_fs_defaultFS: file:///tmp
       HIVE_SITE_CONF_fs_defaultFS: file:///tmp
-      HIVE_SITE_CONF_fs_s3a_endpoint: http://minio-1:9000
+      HIVE_SITE_CONF_fs_s3a_endpoint: http://rustfs-1:9000
       HIVE_SITE_CONF_fs_s3a_access_key: ${PLATYS_AWS_ACCESS_KEY:-admin}
       HIVE_SITE_CONF_fs_s3a_secret_key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
       HIVE_SITE_CONF_fs_s3a_path_style_access: 'true'
@@ -658,7 +673,7 @@ services:
       # for awscli & s3cmd
       AWS_ACCESS_KEY_ID: ${PLATYS_AWS_ACCESS_KEY:-admin}
       AWS_SECRET_ACCESS_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      AWS_ENDPOINT: http://minio-1:9000
+      AWS_ENDPOINT: http://rustfs-1:9000
       AWS_REGION: us-east-1
       AWS_DEFAULT_REGION: us-east-1
       #PYSPARK_PYTHON: /opt/bitnami/python/bin/python3.12
@@ -786,23 +801,29 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  #  ================================== Presto ========================================== #
-  presto-1:
-    image: prestodb/presto:0.296
-    hostname: presto-1
-    container_name: presto-1
+  #  ================================== Trino ========================================== #
+  trino-1:
+    image: trinodb/trino:480
+    hostname: trino-1
+    container_name: trino-1
     labels:
-      com.platys.name: presto
+      com.platys.name: trino
       com.platys.description: SQL Virtualization Engine
-      com.platys.webui.title: Presto UI
-      com.platys.webui.url: http://dataplatform:28081
+      com.platys.webui.title: Trino UI
+      com.platys.webui.url: http://dataplatform:28082/ui/preview
+      com.platys.password.envvars: PLATYS_GSHEET_CREDENTIALS_KEY
     ports:
-      - 28081:8080
+      - 28082:8080
+      - 28087:8443
     environment:
-      COORDINATOR_HOST: presto-1
+      COORDINATOR_HOST: trino-1
+      CATALOG_MANAGEMENT: static
+      CATALOG_CONFIG_DIR: /catalog
+      #CATALOG_STORE: file
+      QUERY_MAX_MEMORY_PER_NODE: 4GB
       HMS_ICEBERG_REST_CATALOG_URI: http://hive-metastore:9084/iceberg
       HMS_ICEBERG_REST_CATALOG_WAREHOUSE: s3a://admin-bucket/iceberg/warehouse
-      S3_ENDPOINT: http://minio-1:9000
+      S3_ENDPOINT: http://rustfs-1:9000
       S3_REGION: us-east-1
       S3_AWS_ACCESS_KEY: ${PLATYS_AWS_ACCESS_KEY:-admin}
       S3_AWS_SECRET_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
@@ -810,80 +831,99 @@ services:
       HIVE_METASTORE_URI: thrift://hive-metastore:9083
       HIVE_STORAGE_FORMAT: ORC
       HIVE_COMPRESSION_CODEC: GZIP
+      HIVE_VIEWS_ENABLED: 'false'
+      HIVE_RUN_AS_INVOKER: 'false'
+      HIVE_LEGACY_TRANSLATION: 'false'
       NESSIE_CATALOG_WAREHOUSE_DIR: s3a://admin-bucket/nessie/warehouse
       KAFKA_NODES: kafka-1:19092,kafka-2:19093,kafka-3:19094
       KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry-1:8081
-      KAFKA_CONFIG_RESOURCES: /opt/presto-server/etc/kafka-configuration.properties
+      KAFKA_CONFIG_RESOURCES: /etc/trino/kafka-configuration.properties
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
       KAFKA_TABLE_NAMES:
       KAFKA_DEFAULT_SCHEMA: default
-      KAFKA_TABLE_DESCRIPTOR_DIR: /opt/presto-server/etc/kafka/
+      KAFKA_TABLE_DESCRIPTOR_DIR: /etc/trino/kafka/
       POSTGRESQL_DATABASE: postgres
       POSTGRESQL_USER: postgres
       POSTGRESQL_PASSWORD: abc123!
+      EVENT_LISTENER_CONFIG_FILES: ''
     volumes:
       - ./data-transfer:/data-transfer
-      - ./conf/presto/single/config.properties:/opt/presto-server/etc/config.properties
-      - ./conf/presto/single/node.properties:/opt/presto-server/etc/node.properties
-      - ./conf/presto/catalog/minio.properties:/opt/presto-server/etc/catalog/minio.properties
-      - ./conf/presto/catalog/postgresql.properties:/opt/presto-server/etc/catalog/postgresql.properties
-      - ./conf/presto/catalog/elasticsearch.properties:/opt/presto-server/etc/catalog/elasticsearch.properties
-      - ./conf/presto/catalog/prometheus.properties:/opt/presto-server/etc/catalog/prometheus.properties
-    restart: unless-stopped
-  #  ================================== Minio ========================================== #
-  minio-1:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: minio-1
-    hostname: minio-1
-    labels:
-      com.platys.name: minio
-      com.platys.description: Software-defined Object Storage
-      com.platys.webui.title: MinIO UI
-      com.platys.webui.url: http://dataplatform:9010
-      com.platys.password.envvars: 'PLATYS_AWS_SECRET_ACCESS_KEY, '
-    ports:
-      # S3 API Port
-      - 9000:9000
-      # UI Port
-      - 9010:9010
-    environment:
-      MINIO_ROOT_USER: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      MINIO_ROOT_PASSWORD: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      # remove region due to problems with RisingWave
-      #MINIO_REGION_NAME: us-east-1
-      #MINIO_REGION: us-east-1
-      MINIO_DOMAIN: minio
-      MINIO_SERVER_URL: http://${PUBLIC_IP:-127.0.0.1}:9000
-      MINIO_COMPRESSION_ENABLE: off
-      MINIO_PROMETHEUS_AUTH_TYPE: public
-      MINIO_PROMETHEUS_URL: http://prometheus-1:9090
-    volumes:
-      - ./data-transfer:/data-transfer
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        mkdir -p /root/.minio && echo "$$MINIO_LICENSE" > /root/.minio/minio.license && exec /usr/bin/docker-entrypoint.sh "$$@"
-    command: minio server /data --console-address ":9010"
+      - ./conf/trino/single/config.properties:/etc/trino/config.properties
+      - ./conf/trino/single/node.properties:/etc/trino/node.properties
+      - ./conf/trino/single/log-debug.properties:/etc/trino/log.properties
+      - ./conf/trino/catalog/minio.properties:/catalog/minio.properties
+      - ./conf/trino/catalog/iceberg-hive.properties:/catalog/iceberg_hive.properties
+      - ./conf/trino/catalog/iceberg-hive-rest.properties:/catalog/iceberg_hive_rest.properties
+      - ./conf/trino/catalog/postgresql.properties:/catalog/postgresql.properties
+      - ./conf/trino/catalog/elasticsearch.properties:/catalog/elasticsearch.properties
+      - ./conf/trino/catalog/prometheus.properties:/catalog/prometheus.properties
+      - ./custom-conf/trino/security:/etc/trino/security
     restart: unless-stopped
     healthcheck:
-      test: [CMD, curl, -f, http://minio-1:9000/minio/health/live]
-      interval: 15s
-      timeout: 20s
-      retries: 3
-  #  ================================== Minio MC ========================================== #
-  minio-mc:
-    image: minio/mc:latest
-    container_name: minio-mc
-    hostname: minio-mc
+      test: [CMD-SHELL, trino --version]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  trino-cli:
+    image: trivadis/trino-cli:latest
+    hostname: trino-cli
+    container_name: trino-cli
     labels:
-      com.platys.name: minio
-      com.platys.description: MinIO Console
+      com.platys.name: trino
+      com.platys.description: Trino CLI
+    volumes:
+      - ./data-transfer:/data-transfer
+    tty: true
+    restart: unless-stopped
+  #  ================================== RustFS (S3 Storage) ========================================== #
+  rustfs-1:
+    image: rustfs/rustfs:latest
+    container_name: rustfs-1
+    hostname: rustfs-1
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      com.platys.name: rustfs
+      com.platys.description: Software-defined Object Storage
+      com.platys.webui.title: RustFS Console
+      com.platys.webui.url: http://dataplatform:9014
+      com.platys.password.envvars: PLATYS_AWS_SECRET_ACCESS_KEY
+    ports:
+      - 9005:9000   # S3 API port
+      - 9014:9010   # Console port    
+    environment:
+      - RUSTFS_VOLUMES=/data/rustfs{0..3} # Define 4 storage volumes
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9010
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_ACCESS_KEY=${PLATYS_AWS_ACCESS_KEY:-admin}
+      - RUSTFS_SECRET_KEY=${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      - RUSTFS_OBS_LOGGER_LEVEL=info
+#      - RUSTFS_TLS_PATH=/opt/tls
+    volumes:
+      - ./data-transfer:/data-transfer
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, sh, -c, curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  #  ================================== RustFS MC ========================================== #
+  rustfs-mc:
+    image: minio/mc:latest
+    container_name: rustfs-mc
+    hostname: rustfs-mc
+    labels:
+      com.platys.name: rustfs
+      com.platys.description: RustFS CLI
     environment:
       # these two env variables are also needed for the s3-credentials.properties file gen to work! 
       AWS_ACCESS_KEY: ${PLATYS_AWS_ACCESS_KEY:-admin}
       AWS_SECRET_ACCESS_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      MC_HOST_minio-1: http://${PLATYS_AWS_ACCESS_KEY:-admin}:${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}@minio-1:9000
+      MC_HOST_rustfs-1: http://${PLATYS_AWS_ACCESS_KEY:-admin}:${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}@rustfs-1:9000
     volumes:
       - ./data-transfer:/data-transfer
       - ./scripts/docker/wait-for-it.sh:/usr/src/app/wait-for-it.sh
@@ -891,11 +931,11 @@ services:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/wait-for-it.sh -t 180 minio-1:9000
-        mc mb --ignore-existing minio-1/admin-bucket
+        /usr/src/app/wait-for-it.sh -t 180 rustfs-1:9000
+        mc mb --ignore-existing rustfs-1/admin-bucket
               for bucket in $$(tr ',' '\n' <<< "iceberg-bucket,hive-bucket,landing-bucket")
         do
-          mc mb --ignore-existing minio-1/$$bucket
+          mc mb --ignore-existing rustfs-1/$$bucket
         done
         #
         while [ 1 -eq 1 ];do sleep 60;done
@@ -948,8 +988,8 @@ services:
       - ./scripts/grafana/dashboards/kafka/OTel_kafkametrics.json:/etc/grafana/provisioning/dashboards/kafka/OTel_kafkametrics.json
       - ./scripts/grafana/dashboards/elasticsearch:/etc/grafana/provisioning/dashboards/elasticsearch
       - ./scripts/grafana/dashboards/postgresql:/etc/grafana/provisioning/dashboards/postgresql
-      - ./scripts/grafana/dashboards/minio:/etc/grafana/provisioning/dashboards/minio
       - ./scripts/grafana/dashboards/spark:/etc/grafana/provisioning/dashboards/spark
+      - ./scripts/grafana/dashboards/trino:/etc/grafana/provisioning/dashboards/trino
       - ./scripts/grafana/datasources/prometheus-datasource.yml:/etc/grafana/provisioning/datasources/prometheus-datasource.yml
     restart: unless-stopped
     healthcheck:

@@ -18,13 +18,14 @@
 |[ksqldb-server-1](./documentation/services/ksqldb )|[Rest API](http://127.0.0.1:8088)|8088<br>1095<br>|8088<br>1095<br>|ksqlDB Streaming Database - Node 1
 |[lhbank-cardholder-app](./documentation/services/none )|[Rest API](http://127.0.0.1:29000)|29000<br>|8082<br>|CardHolder Spring Boot Application
 |[markdown-viewer](./documentation/services/markdown-viewer )|[Web UI](http://127.0.0.1:80)|80<br>|3000<br>|Platys Platform homepage viewer
-|[minio-1](./documentation/services/minio )|[Web UI](http://127.0.0.1:9010)|9000<br>9010<br>|9000<br>9010<br>|Software-defined Object Storage
-|[minio-mc](./documentation/services/minio )||||MinIO Console
 |[postgresql](./documentation/services/postgresql )||5432<br>|5432<br>|Open-Source object-relational database system
-|[presto-1](./documentation/services/presto )|[Web UI](http://127.0.0.1:28081)|28081<br>|8080<br>|SQL Virtualization Engine
 |[prometheus-1](./documentation/services/prometheus )|[Web UI](http://127.0.0.1:9090/graph) - [Rest API](http://127.0.0.1:9090/api/v1)|9090<br>|9090<br>|Monitoring system and time series database
+|[rustfs-1](./documentation/services/rustfs )|[Web UI](http://127.0.0.1:9014)|9005<br>9014<br>|9000<br>9010<br>|Software-defined Object Storage
+|[rustfs-mc](./documentation/services/rustfs )||||RustFS CLI
 |[schema-registry-1](./documentation/services/schema-registry )|[Rest API](http://127.0.0.1:8081)|8081<br>|8081<br>|Confluent Schema Registry
 |[shadowtraffic](./documentation/services/shadowtraffic )||||Simulate production traffic to your backend.
-|[spark-master](./documentation/services/spark )|[Web UI](http://127.0.0.1:28304)|28304<br>6066<br>7077<br>4040-4044<br>|28304<br>6066<br>7077<br>4040-4044<br>|Spark Master Node|
+|[spark-master](./documentation/services/spark )|[Web UI](http://127.0.0.1:28304)|28304<br>6066<br>7077<br>4040-4044<br>|28304<br>6066<br>7077<br>4040-4044<br>|Spark Master Node
+|[trino-1](./documentation/services/trino )|[Web UI](http://127.0.0.1:28082/ui/preview)|28082<br>28087<br>|8080<br>8443<br>|SQL Virtualization Engine
+|[trino-cli](./documentation/services/trino )||||Trino CLI|
 
 **Note:** init container ("init: true") are not shown
