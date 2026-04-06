@@ -577,6 +577,162 @@ services:
       timeout: 10s
       retries: 10
       start_period: 20s
+  spark-worker-1:
+    image: bitnamilegacy/spark:3.5.3
+    container_name: spark-worker-1
+    hostname: spark-worker-1
+    labels:
+      com.platys.name: spark
+      com.platys.description: Spark Worker Node
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    ports:
+      - 28111:28111
+    environment:
+      # bitnami env vars
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_RPC_AUTHENTICATION_ENABLED: no
+      SPARK_RPC_ENCRYPTION_ENABLED: no
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: no
+      SPARK_SSL_ENABLED: no
+      # spark standard env vars
+      SPARK_WORKER_WEBUI_PORT: '28111'
+      SPARK_WORKER_OPTS: -Dspark.worker.cleanup.enabled=true
+      SPARK_PUBLIC_DNS: ${PUBLIC_IP:-127.0.0.1}
+      # env vars for config files
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_endpoint: http://rustfs-1:9000
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_access_key: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_secret_key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_path_style_access: 'true'
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      AWS_SECRET_ACCESS_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_defaultFS: s3a://admin-bucket
+      SPARK_DEFAULTS_CONF_spark_sql_warehouse_dir: s3a://admin-bucket/hive/warehouse
+      SPARK_DEFAULTS_CONF_spark_driver_extraJavaOptions:
+      SPARK_DEFAULTS_CONF_spark_executor_extraJavaOptions:
+      SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_jars: builtin
+      # SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_version: 3.1.2    
+      SPARK_DEFAULTS_CONF_spark_sql_catalogImplementation: in-memory
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_spark__catalog: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions,
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg_uri: thrift://hive-metastore:9083
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg_warehouse: s3a://admin-bucket/iceberg/warehouse
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_type: rest
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_uri: http://hive-metastore:9084/iceberg
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_token: not_used
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_warehouse: s3a://admin-bucket/iceberg/warehouse
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_io___impl: org.apache.iceberg.aws.s3.S3FileIO
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_endpoint: http://rustfs-1:9000
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_path___style___access: true
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_access___key___id: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
+      SPARK_DEFAULTS_CONF_spark_jars_repositories:
+      SPARK_DEFAULTS_CONF_spark_jars_packages: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2'
+      SPARK_DEFAULTS_CONF_spark_jars_excludes:
+      # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
+      SPARK_INSTALL_JAVA_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
+      SPARK_INSTALL_PYTHON_PACKAGES: ' delta-spark==3.3.2'
+      SPARK_DEFAULTS_CONF_spark_jars: /opt/bitnami/spark/jars/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+      SPARK_DEFAULTS_CONF_spark_jars_ivySettings:
+    volumes:
+      - ./data-transfer:/data-transfer
+      - ./conf/spark/hive-site.xml:/opt/bitnami/spark/conf.default/hive-site.xml
+      - ./conf/spark/spark-defaults.conf:/opt/bitnami/spark/conf.default/spark-defaults.conf
+      - ./init/spark:/docker-entrypoint-initdb.d
+      - ./scripts/docker/maven-download.sh:/maven-download.sh
+      - ./container-volume/spark/logs/:/var/log/spark/logs
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, "python3 -c 'import socket; socket.create_connection((\"localhost\", 28111), timeout=5)'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+  spark-worker-2:
+    image: bitnamilegacy/spark:3.5.3
+    container_name: spark-worker-2
+    hostname: spark-worker-2
+    labels:
+      com.platys.name: spark
+      com.platys.description: Spark Worker Node
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    ports:
+      - 28112:28112
+    environment:
+      # bitnami env vars
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_RPC_AUTHENTICATION_ENABLED: no
+      SPARK_RPC_ENCRYPTION_ENABLED: no
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: no
+      SPARK_SSL_ENABLED: no
+      # spark standard env vars
+      SPARK_WORKER_WEBUI_PORT: '28112'
+      SPARK_WORKER_OPTS: -Dspark.worker.cleanup.enabled=true
+      SPARK_PUBLIC_DNS: ${PUBLIC_IP:-127.0.0.1}
+      # env vars for config files
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_endpoint: http://rustfs-1:9000
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_access_key: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_secret_key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_path_style_access: 'true'
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      AWS_SECRET_ACCESS_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      SPARK_DEFAULTS_CONF_spark_hadoop_fs_defaultFS: s3a://admin-bucket
+      SPARK_DEFAULTS_CONF_spark_sql_warehouse_dir: s3a://admin-bucket/hive/warehouse
+      SPARK_DEFAULTS_CONF_spark_driver_extraJavaOptions:
+      SPARK_DEFAULTS_CONF_spark_executor_extraJavaOptions:
+      SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_jars: builtin
+      # SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_version: 3.1.2    
+      SPARK_DEFAULTS_CONF_spark_sql_catalogImplementation: in-memory
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_spark__catalog: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions,
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg_uri: thrift://hive-metastore:9083
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg_warehouse: s3a://admin-bucket/iceberg/warehouse
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_type: rest
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest: org.apache.iceberg.spark.SparkCatalog
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_uri: http://hive-metastore:9084/iceberg
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_token: not_used
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_warehouse: s3a://admin-bucket/iceberg/warehouse
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_io___impl: org.apache.iceberg.aws.s3.S3FileIO
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_endpoint: http://rustfs-1:9000
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_path___style___access: true
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_access___key___id: ${PLATYS_AWS_ACCESS_KEY:-admin}
+      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
+      SPARK_DEFAULTS_CONF_spark_jars_repositories:
+      SPARK_DEFAULTS_CONF_spark_jars_packages: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2'
+      SPARK_DEFAULTS_CONF_spark_jars_excludes:
+      # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
+      SPARK_INSTALL_JAVA_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
+      SPARK_INSTALL_PYTHON_PACKAGES: ' delta-spark==3.3.2'
+      SPARK_DEFAULTS_CONF_spark_jars: /opt/bitnami/spark/jars/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+      SPARK_DEFAULTS_CONF_spark_jars_ivySettings:
+    volumes:
+      - ./data-transfer:/data-transfer
+      - ./conf/spark/hive-site.xml:/opt/bitnami/spark/conf.default/hive-site.xml
+      - ./conf/spark/spark-defaults.conf:/opt/bitnami/spark/conf.default/spark-defaults.conf
+      - ./init/spark:/docker-entrypoint-initdb.d
+      - ./scripts/docker/maven-download.sh:/maven-download.sh
+      - ./container-volume/spark/logs/:/var/log/spark/logs
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, "python3 -c 'import socket; socket.create_connection((\"localhost\", 28112), timeout=5)'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
   #  ================================== Apache Hive Metastore ========================================== #
   hive-metastore:
     image: trivadis/apache-hive:4.2.0-postgresql-standalone-metastore-s3
@@ -1000,6 +1156,40 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+  #  ================================== Portainer ========================================== #
+  portainer:
+    image: portainer/portainer-ce:alpine-sts
+    container_name: portainer
+    hostname: portainer
+    labels:
+      com.platys.name: portainer
+      com.platys.description: Easy Docker and Kubernetes management
+      com.platys.webui.title: Portainer UI
+      com.platys.webui.url: http://dataplatform:28137
+    ports:
+      - 28137:9000
+    volumes:
+      - ./data-transfer:/data-transfer
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --admin-password '$$2y$$05$$Qf7g15yr4ohg8UyxBkVR1OPXVigCcldXoCxS.HgR9xzSALeiv4H.K'
+    restart: unless-stopped
+  #  ================================== Rancher ========================================== #
+  rancher:
+    image: rancher/rancher:latest
+    container_name: rancher
+    hostname: rancher
+    labels:
+      com.platys.name: rancher
+      com.platys.description: Kubernetes cluster management
+      com.platys.webui.title: Rancher UI
+      com.platys.webui.url: https://dataplatform:28371
+    ports:
+      - 28370:80
+      - 28371:443
+    volumes:
+      - ./data-transfer:/data-transfer
+    privileged: true
+    restart: unless-stopped
   #  ================================== markdown-viewer ========================================== #
   markdown-viewer:
     image: dannyben/madness:latest
