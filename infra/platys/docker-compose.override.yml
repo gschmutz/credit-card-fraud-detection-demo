@@ -1,6 +1,6 @@
 services:
   lhbank-cardholder-app:
-    image: gschmutz/lhbank-cardholder:0.0.1
+    image: ghcr.io/gschmutz/lhbank-cardholder:main
     container_name: lhbank-cardholder-app
     hostname: lhbank-cardholder-app
     labels:
