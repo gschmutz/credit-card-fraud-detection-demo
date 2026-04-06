@@ -1173,23 +1173,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --admin-password '$$2y$$05$$Qf7g15yr4ohg8UyxBkVR1OPXVigCcldXoCxS.HgR9xzSALeiv4H.K'
     restart: unless-stopped
-  #  ================================== Rancher ========================================== #
-  rancher:
-    image: rancher/rancher:latest
-    container_name: rancher
-    hostname: rancher
-    labels:
-      com.platys.name: rancher
-      com.platys.description: Kubernetes cluster management
-      com.platys.webui.title: Rancher UI
-      com.platys.webui.url: https://dataplatform:28371
-    ports:
-      - 28370:80
-      - 28371:443
-    volumes:
-      - ./data-transfer:/data-transfer
-    privileged: true
-    restart: unless-stopped
   #  ================================== markdown-viewer ========================================== #
   markdown-viewer:
     image: dannyben/madness:latest

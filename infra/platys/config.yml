@@ -2963,7 +2963,7 @@
       #
       # ===== Rancher UI ========
       #
-      RANCHER_enable: true
+      RANCHER_enable: false
       RANCHER_volume_map_data: false
       #
       # ===== Cetusguard ========
