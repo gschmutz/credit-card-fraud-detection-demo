@@ -29,9 +29,14 @@
       env: '${PLATYS_ENV}'
       data_centers: 'dc1,dc2,dc3'
       data_center_to_use: 0
+      # either 'minio' or 'rustfs'
+      s3_service_to_use: rustfs
+      # a list of table formats to use, separated by comma, for example 'delta,iceberg,hudi'
+      table_formats_to_use: 'iceberg'   
       # enable jmx monitoring with prometheus
       jmx_monitoring_with_prometheus_enable: false
-      copy_cookbook_data_folder: true
+      copy_cookbook_data_folder: true  
+
       # ========================================================================
       # Platys Services
       # ========================================================================
@@ -2286,7 +2291,7 @@
       #
       # ===== Trino ========
       #
-      TRINO_enable: false
+      TRINO_enable: true
       TRINO_custom_image_name: ''
       # "single" or "cluster" install
       TRINO_install: single
@@ -2384,7 +2389,7 @@
       #
       # ===== Presto ========
       #
-      PRESTO_enable: true
+      PRESTO_enable: false
       # "single" or "cluster" install
       PRESTO_install: single
       PRESTO_workers: 3
@@ -2543,7 +2548,11 @@
       #
       #=====  MinIO Object Storage ========
       #
-      MINIO_enable: true
+      MINIO_enable: false
+      # either "community" or "aistor"
+      MINIO_edition: 'community'
+      # the Minio AIStor license if not specified in PLATYS_MINIO_AISTOR_LICENSE env variable
+      MINIO_aistor_license:       
       MINIO_volume_map_data: false
       MINIO_datacenters: 1
       # "single" or "cluster"
@@ -2591,6 +2600,21 @@
       #
       ADMINIO_UI_enable: false
       S3MANAGER_enable: false
+      #
+      #=====  RustFS ========
+      #
+      RUSTFS_enable: true
+      RUSTFS_volume_map_data: false
+      RUSTFS_volume_map_logs: false
+      RUSTFS_access_key: admin
+      RUSTFS_secret_key: abc123abc123!
+      RUSTFS_admin_bucket_name: admin-bucket
+      # add additional buckets, comma separated, admin-bucket will be created by default
+      RUSTFS_buckets: 'iceberg-bucket,hive-bucket,landing-bucket'
+      RUSTFS_upload_data_transfer_to_bucket_enabled: false
+      RUSTFS_upload_data_transfer_bucket_name: 'data-transfer-bucket'
+      RUSTFS_upload_data_transfer_subfolders: ''
+
       #
       #=====  Garage ========
       #

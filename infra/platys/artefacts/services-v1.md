@@ -18,13 +18,14 @@
 |[ksqldb-server-1](./documentation/services/ksqldb )||<http://127.0.0.1:8088>
 |[lhbank-cardholder-app](./documentation/services/none )||<http://127.0.0.1:29000>
 |[markdown-viewer](./documentation/services/markdown-viewer )|<http://127.0.0.1:80>|
-|[minio-1](./documentation/services/minio )|<http://127.0.0.1:9010>|
-|[minio-mc](./documentation/services/minio )||
 |[postgresql](./documentation/services/postgresql )||
-|[presto-1](./documentation/services/presto )|<http://127.0.0.1:28081>|
 |[prometheus-1](./documentation/services/prometheus )|<http://127.0.0.1:9090/graph>|<http://127.0.0.1:9090/api/v1>
+|[rustfs-1](./documentation/services/rustfs )|<http://127.0.0.1:9014>|
+|[rustfs-mc](./documentation/services/rustfs )||
 |[schema-registry-1](./documentation/services/schema-registry )||<http://127.0.0.1:8081>
 |[shadowtraffic](./documentation/services/shadowtraffic )||
-|[spark-master](./documentation/services/spark )|<http://127.0.0.1:28304>||
+|[spark-master](./documentation/services/spark )|<http://127.0.0.1:28304>|
+|[trino-1](./documentation/services/trino )|<http://127.0.0.1:28082/ui/preview>|
+|[trino-cli](./documentation/services/trino )|||
 
 **Note:** init container ("init: true") are not shown
