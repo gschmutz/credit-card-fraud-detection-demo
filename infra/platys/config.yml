@@ -532,7 +532,7 @@
       SPARK_base_version: 3.5
       # "hive" or "in-memory"
       SPARK_catalog: in-memory
-      SPARK_workers: 0
+      SPARK_workers: 2
       # to restrict the default cores, use '-Dspark.deploy.defaultCores=6'
       SPARK_master_opts: ''
       SPARK_worker_cores:
@@ -2954,7 +2954,7 @@
       #
       # ===== Portainer Container UI ========
       #
-      PORTAINER_enable: false
+      PORTAINER_enable: true
       #
       # ===== Docker Exec Web Console ========
       #
@@ -2963,7 +2963,7 @@
       #
       # ===== Rancher UI ========
       #
-      RANCHER_enable: false
+      RANCHER_enable: true
       RANCHER_volume_map_data: false
       #
       # ===== Cetusguard ========
