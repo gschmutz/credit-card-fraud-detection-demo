@@ -1194,13 +1194,13 @@
       #
       JUPYTER_enable: true
       # one of 'minimal', 'r', 'scipy', 'julia', 'tensorflow', 'pytorch', 'datascience', 'pyspark', all-spark'
-      JUPYTER_edition: 'pyspark'
-      JUPYTER_spark_base_version: '4.1'
+      JUPYTER_edition: 'all-spark'
+      JUPYTER_spark_base_version: '3.5'
       JUPYTER_upload_data_transfer_to_workspace_enabled: false
       JUPYTER_volume_map_data: false
       JUPYTER_data_folder_on_docker_host: ./container-volume/jupyter/work
       # a space separated list of python packages
-      JUPYTER_python_packages: 'pyspark==4.1.1 jupysql protobuf==6.33.0 boto3'
+      JUPYTER_python_packages: 'pyspark==3.5.3 jupysql pandas arrow pyarrow grpcio-status boto3'
       JUPYTER_requirements_file: ''
       JUPYTER_spark_jars_packages: ''
       JUPYTER_tokenless: false
@@ -1211,7 +1211,7 @@
       # one of 'lab', 'notebook', 'nbclassic', 'server'
       JUPYTER_startup_cmd: 'lab'
       #JUPYTER_download_jars: 'com.amazonaws:aws-java-sdk-bundle:1.12.262,org.apache.hadoop:hadoop-aws:3.3.4,com.google.guava:guava:27.1-jre'
-      JUPYTER_download_jars: 'software.amazon.awssdk:bundle:2.29.52,org.apache.hadoop:hadoop-aws:3.4.2,com.google.guava:guava:33.4.8-jre'    # spark 4.1.1 (use mvn repository to find spark jar and then select downstream dependencies)
+      JUPYTER_download_jars: 'com.amazonaws:aws-java-sdk-bundle:1.12.262,org.apache.hadoop:hadoop-aws:3.3.4,com.google.guava:guava:27.0-jre'
       JUPYTER_volume_map_docker_daemon: false
       #
       # ===== JupyterHub ========
