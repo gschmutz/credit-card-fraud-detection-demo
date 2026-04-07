@@ -1016,7 +1016,7 @@ services:
       - 28087:8443
     environment:
       COORDINATOR_HOST: trino-1
-      CATALOG_MANAGEMENT: dynamic
+      CATALOG_MANAGEMENT: static
       CATALOG_CONFIG_DIR: /catalog
       CATALOG_STORE: file
       QUERY_MAX_MEMORY_PER_NODE: 4GB
