@@ -2315,7 +2315,7 @@
       # either starburstdata or oss
       TRINO_edition: 'oss'
       # either 'static' or 'dynamic'
-      TRINO_catalog_management: dynamic
+      TRINO_catalog_management: static
       # either 'file' or 'memory'      
       TRINO_catalog_store: file
       TRINO_db_migrations_enabled: true
