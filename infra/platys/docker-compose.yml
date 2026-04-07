@@ -1000,25 +1000,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  #  ================================== Cloudbeaver ========================================== #
-  cloudbeaver:
-    image: dbeaver/cloudbeaver:latest
-    container_name: cloudbeaver
-    hostname: cloudbeaver
-    labels:
-      com.platys.name: cloudbeaver
-      com.platys.description: Cloud Database Manager
-      com.platys.webui.title: Cloudbeaver UI
-      com.platys.webui.url: http://dataplatform:8978
-      com.platys.password.envvars: PLATYS_CLOUDBEAVER_ADMIN_PASSWORD
-    ports:
-      - 8978:8978
-    environment:
-      CB_SERVER_NAME: Cloudbeaver
-    volumes:
-      - ./data-transfer:/data-transfer
-      - ./conf/cloudbeaver/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/.dbeaver/data-sources.json
-    restart: unless-stopped
   #  ================================== Trino ========================================== #
   trino-1:
     image: trinodb/trino:480
@@ -1218,23 +1199,6 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
-  #  ================================== Portainer ========================================== #
-  portainer:
-    image: portainer/portainer-ce:alpine-sts
-    container_name: portainer
-    hostname: portainer
-    labels:
-      com.platys.name: portainer
-      com.platys.description: Easy Docker and Kubernetes management
-      com.platys.webui.title: Portainer UI
-      com.platys.webui.url: http://dataplatform:28137
-    ports:
-      - 28137:9000
-    volumes:
-      - ./data-transfer:/data-transfer
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: --admin-password '$$2y$$05$$Qf7g15yr4ohg8UyxBkVR1OPXVigCcldXoCxS.HgR9xzSALeiv4H.K'
-    restart: unless-stopped
   #  ================================== markdown-viewer ========================================== #
   markdown-viewer:
     image: dannyben/madness:latest
