@@ -2242,7 +2242,7 @@
       #
       # ===== Cloudbeaver DB UI ========
       #
-      CLOUDBEAVER_enable: true
+      CLOUDBEAVER_enable: false
       CLOUDBEAVER_volume_map_workspace: false
       CLOUDBEAVER_admin_username:
       CLOUDBEAVER_admin_password: Abc123!abc123!
@@ -2969,7 +2969,7 @@
       #
       # ===== Portainer Container UI ========
       #
-      PORTAINER_enable: true
+      PORTAINER_enable: false
       #
       # ===== Docker Exec Web Console ========
       #
