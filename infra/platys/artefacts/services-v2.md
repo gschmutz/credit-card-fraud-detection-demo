@@ -18,13 +18,17 @@
 |[ksqldb-server-1](./documentation/services/ksqldb )|[Rest API](http://127.0.0.1:8088)|8088<br>1095<br>|8088<br>1095<br>|ksqlDB Streaming Database - Node 1
 |[lhbank-cardholder-app](./documentation/services/none )|[Rest API](http://127.0.0.1:29000)|29000<br>|8082<br>|CardHolder Spring Boot Application
 |[markdown-viewer](./documentation/services/markdown-viewer )|[Web UI](http://127.0.0.1:80)|80<br>|3000<br>|Platys Platform homepage viewer
+|[portainer](./documentation/services/portainer )|[Web UI](http://127.0.0.1:28137)|28137<br>|9000<br>|Easy Docker and Kubernetes management
 |[postgresql](./documentation/services/postgresql )||5432<br>|5432<br>|Open-Source object-relational database system
 |[prometheus-1](./documentation/services/prometheus )|[Web UI](http://127.0.0.1:9090/graph) - [Rest API](http://127.0.0.1:9090/api/v1)|9090<br>|9090<br>|Monitoring system and time series database
+|[rancher](./documentation/services/rancher )|[Web UI](https://127.0.0.1:28371)|28370<br>28371<br>|80<br>443<br>|Kubernetes cluster management
 |[rustfs-1](./documentation/services/rustfs )|[Web UI](http://127.0.0.1:9014)|9005<br>9014<br>|9000<br>9010<br>|Software-defined Object Storage
 |[rustfs-mc](./documentation/services/rustfs )||||RustFS CLI
 |[schema-registry-1](./documentation/services/schema-registry )|[Rest API](http://127.0.0.1:8081)|8081<br>|8081<br>|Confluent Schema Registry
 |[shadowtraffic](./documentation/services/shadowtraffic )||||Simulate production traffic to your backend.
 |[spark-master](./documentation/services/spark )|[Web UI](http://127.0.0.1:28304)|28304<br>6066<br>7077<br>4040-4044<br>|28304<br>6066<br>7077<br>4040-4044<br>|Spark Master Node
+|[spark-worker-1](./documentation/services/spark )||28111<br>|28111<br>|Spark Worker Node
+|[spark-worker-2](./documentation/services/spark )||28112<br>|28112<br>|Spark Worker Node
 |[trino-1](./documentation/services/trino )|[Web UI](http://127.0.0.1:28082/ui/preview)|28082<br>28087<br>|8080<br>8443<br>|SQL Virtualization Engine
 |[trino-cli](./documentation/services/trino )||||Trino CLI|
 

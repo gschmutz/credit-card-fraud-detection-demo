@@ -1574,6 +1574,21 @@
       METABASE_mysql_user: 'metabase'
       METABASE_mysql_password: 'abc123!'
       #
+      # ===== Lightdash ========
+      #
+      LIGHTDASH_enable: true
+      LIGHTDASH_volume_map_dbt_project: false
+      LIGHTDASH_dbt_project_path:
+      LIGHTDASH_secret: 'changeme-use-a-long-random-secret-here'
+      LIGHTDASH_license_key: ''
+      # postgres connection (requires POSTGRESQL_enable: true)
+      LIGHTDASH_postgres_dbname: 'postgres'
+      LIGHTDASH_postgres_user: 'postgres'
+      LIGHTDASH_postgres_password: 'abc123!'
+      # optional: S3/MinIO for file storage
+      LIGHTDASH_s3_bucket: ''
+      LIGHTDASH_s3_results_bucket: ''      
+      #
       # ===== Superset ========
       #
       SUPERSET_enable: false
@@ -2300,7 +2315,9 @@
       # either starburstdata or oss
       TRINO_edition: 'oss'
       # either 'static' or 'dynamic'
-      TRINO_catalog_management: static
+      TRINO_catalog_management: dynamic
+      # either 'file' or 'memory'      
+      TRINO_catalog_store: file
       TRINO_db_migrations_enabled: true
       TRINO_auth_enabled: false
       TRINO_auth_use_custom_password_file: false
@@ -2963,7 +2980,7 @@
       #
       # ===== Rancher UI ========
       #
-      RANCHER_enable: true
+      RANCHER_enable: false
       RANCHER_volume_map_data: false
       #
       # ===== Cetusguard ========
