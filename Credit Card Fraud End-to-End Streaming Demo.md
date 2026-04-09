@@ -1524,7 +1524,7 @@ spark = (
 %sql spark
 ```
 
-Create the three target tables. The `DROP TABLE IF EXISTS` statements make this step safe to re-run:
+Create the three target tables. The `DROP TABLE IF EXISTS` statements make this step safe to re-run. Instead of using `spark-sql` CLI we can also do it from Jupyter:
 
 ```sql
 %%sql
@@ -1562,17 +1562,6 @@ CREATE TABLE customer_db.cur_card_t (
 );
 ```
 
-Point to the source raw table:
-
-```
-from pyspark.sql import SparkSession
-
-spark = SparkSession.builder.getOrCreate()
-
-# Source table
-source_table = "customer_db.raw_card_holder_t"
-```
-
 Upsert person records from the raw nested table. The `MERGE INTO` statement matches on `person_id` — existing records are updated and new records are inserted, making this safe to run repeatedly as new cardholder events arrive:
 
 ```
@@ -1589,7 +1578,7 @@ USING (
     card_holder.segment           AS segment,
     card_holder.avg_transaction_amount AS avg_transaction_amount,
     card_holder.onboarded_date    AS onboarded_date
-  FROM {source_table}
+  FROM customer_db.raw_card_holder_t
 ) s
 ON t.person_id = s.person_id
 WHEN MATCHED THEN UPDATE SET *
@@ -1658,18 +1647,6 @@ WHEN NOT MATCHED THEN INSERT *
 ```
 
 > **What just happened?** Spark read the raw nested Iceberg table and used three `MERGE INTO` statements to upsert data into the three flat curated tables. The `cur_card_t` table is especially important because it links `card_number` (used in transactions) to `person_id` (used in `cur_person_t`) — enabling the full transaction-to-person join that was demonstrated in section 10.
-
-Finally, check whether any cardholder appears more than once in the raw table (this can happen if the cardholder was updated and a new event was published to the topic):
-
-```
-%%sql
-SELECT card_holder.id, count(*)
-FROM customer_db.raw_card_holder_t
-GROUP BY card_holder.id
-HAVING COUNT(*) > 1
-```
-
-> **What you should see:** Ideally no rows — or a small number of rows for cardholders who have been updated since they were first onboarded. The `MERGE INTO` approach in the curation steps above handles duplicates correctly by updating the existing row rather than inserting a second one.
 
 ## 11 - Using Trino to query and curate
 
@@ -1749,9 +1726,9 @@ FROM iceberg_hive_rest.payment_db.raw_transaction_t t
 LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
        ON t.merchant_id = m.merchant_id
 LEFT JOIN postgresql.public.card c
- 		ON t.card_number = c.card_number
+ 		ON t.card_number = c.number
 LEFT JOIN postgresql.public.person p
- 		ON c.person_id = p.person_id
+ 		ON c.id = p.card_id
 ```
 
 > **What just happened?** In the last query, Trino joined an Iceberg table on RustFS (`raw_transaction_t`) with two live PostgreSQL tables (`card` and `person`) in a single query — without any ETL step. This federated capability makes Trino particularly useful for ad-hoc analysis before curation pipelines have run.
