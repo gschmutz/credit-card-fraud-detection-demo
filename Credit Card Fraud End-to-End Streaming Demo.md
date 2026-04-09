@@ -1453,92 +1453,7 @@ show tables in payment_db
 
 > **What you should see:** Three tables listed: `raw_transaction_t`, `cur_transaction_with_merchant_sql_t`, and `cur_transaction_with_merchant_t`. The curated tables should contain the same data — both approaches produce equivalent results.
 
-## 10 - Using Trino to query and curate
-
-**Goal:** Use Trino's federated query engine to join Iceberg tables on object storage with live PostgreSQL data in a single SQL statement, and understand when this is preferable to waiting for Spark curation jobs to run.
-
-Trino (accessible at <http://dataplatform:28082>) provides a federated SQL engine that can query Iceberg tables on RustFS alongside live PostgreSQL tables in a single query — without copying data. The Iceberg catalog is registered as `iceberg_hive_rest` and the PostgreSQL connector as `postgresql`.
-
-Connect to the Trino CLI:
-
-```bash
-docker exec -ti trino-1 trino --server trino-1:8080 --catalog iceberg_hive_rest --schema payment_db
-```
-
-Join transactions with the merchant Iceberg table:
-
-```sql
-SELECT t.transaction_id,
-       t.card_number,
-       t.currency,
-       t.amount,
-       t.channel,
-       t.transaction_date,
-       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
-       m.name,
-       m.country,
-       m.city,
-       m.category_name
-FROM iceberg_hive_rest.payment_db.raw_transaction_t t
-LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
-       ON t.merchant_id = m.merchant_id;
-```
-
-> **What you should see:** Enriched transaction rows with merchant details, identical to the output from the Spark curation job in section 09 — but computed on demand without needing to pre-write a curated table.
-
-Now join with the cardholder tables to add cardholder identity to each transaction. Two options are shown: using the curated Iceberg cardholder tables (populated in section 09) or querying directly from the live PostgreSQL source:
-
-```sql
-SELECT t.transaction_id,
-       t.card_number,
-       t.currency,
-       t.amount,
-       t.channel,
-       t.transaction_date,
-       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
-       m.name,
-       m.country,
-       m.city,
-       m.category_name,
-       p.first_name,
-       p.last_name
-FROM iceberg_hive_rest.payment_db.raw_transaction_t t
-LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
-       ON t.merchant_id = m.merchant_id
-LEFT JOIN iceberg_hive_rest.customer_db.cur_card_t c
- 		ON t.card_number = c.card_number
-LEFT JOIN iceberg_hive_rest.customer_db.cur_person_t p
- 		ON c.person_id = p.person_id;
-```
-
-Alternatively, query directly from the PostgreSQL source system — useful before the cardholder curation pipeline (section 09) has run:
-
-```sql
-SELECT t.transaction_id,
-       t.card_number,
-       t.currency,
-       t.amount,
-       t.channel,
-       t.transaction_date,
-       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
-       m.name,
-       m.country,
-       m.city,
-       m.category_name,
-       p.first_name,
-       p.last_name
-FROM iceberg_hive_rest.payment_db.raw_transaction_t t
-LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
-       ON t.merchant_id = m.merchant_id
-LEFT JOIN postgresql.public.card c
- 		ON t.card_number = c.card_number
-LEFT JOIN postgresql.public.person p
- 		ON c.person_id = p.person_id
-```
-
-> **What just happened?** In the last query, Trino joined an Iceberg table on RustFS (`raw_transaction_t`) with two live PostgreSQL tables (`card` and `person`) in a single query — without any ETL step. This federated capability makes Trino particularly useful for ad-hoc analysis before curation pipelines have run.
-
-## 11 - Curation Card Holder Data
+## 10 - Curation Card Holder Data
 
 **Goal:** Normalize the nested cardholder data from `customer_db.raw_card_holder_t` into flat, joinable Iceberg tables that can be queried efficiently by Trino (as used in section 10) and Spark.
 
@@ -1755,3 +1670,89 @@ HAVING COUNT(*) > 1
 ```
 
 > **What you should see:** Ideally no rows — or a small number of rows for cardholders who have been updated since they were first onboarded. The `MERGE INTO` approach in the curation steps above handles duplicates correctly by updating the existing row rather than inserting a second one.
+
+## 11 - Using Trino to query and curate
+
+**Goal:** Use Trino's federated query engine to join Iceberg tables on object storage with live PostgreSQL data in a single SQL statement, and understand when this is preferable to waiting for Spark curation jobs to run.
+
+Trino (accessible at <http://dataplatform:28082>) provides a federated SQL engine that can query Iceberg tables on RustFS alongside live PostgreSQL tables in a single query — without copying data. The Iceberg catalog is registered as `iceberg_hive_rest` and the PostgreSQL connector as `postgresql`.
+
+Connect to the Trino CLI:
+
+```bash
+docker exec -ti trino-1 trino --server trino-1:8080 --catalog iceberg_hive_rest --schema payment_db
+```
+
+Join transactions with the merchant Iceberg table:
+
+```sql
+SELECT t.transaction_id,
+       t.card_number,
+       t.currency,
+       t.amount,
+       t.channel,
+       t.transaction_date,
+       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
+       m.name,
+       m.country,
+       m.city,
+       m.category_name
+FROM iceberg_hive_rest.payment_db.raw_transaction_t t
+LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
+       ON t.merchant_id = m.merchant_id;
+```
+
+> **What you should see:** Enriched transaction rows with merchant details, identical to the output from the Spark curation job in section 09 — but computed on demand without needing to pre-write a curated table.
+
+Now join with the cardholder tables to add cardholder identity to each transaction. Two options are shown: using the curated Iceberg cardholder tables (populated in section 09) or querying directly from the live PostgreSQL source:
+
+```sql
+SELECT t.transaction_id,
+       t.card_number,
+       t.currency,
+       t.amount,
+       t.channel,
+       t.transaction_date,
+       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
+       m.name,
+       m.country,
+       m.city,
+       m.category_name,
+       p.first_name,
+       p.last_name
+FROM iceberg_hive_rest.payment_db.raw_transaction_t t
+LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
+       ON t.merchant_id = m.merchant_id
+LEFT JOIN iceberg_hive_rest.customer_db.cur_card_t c
+ 		ON t.card_number = c.card_number
+LEFT JOIN iceberg_hive_rest.customer_db.cur_person_t p
+ 		ON c.person_id = p.person_id;
+```
+
+Alternatively, query directly from the PostgreSQL source system — useful before the cardholder curation pipeline (section 09) has run:
+
+```sql
+SELECT t.transaction_id,
+       t.card_number,
+       t.currency,
+       t.amount,
+       t.channel,
+       t.transaction_date,
+       CONCAT(m.name, ' ', UPPER(m.city), ' ', m.country) AS booking_text,
+       m.name,
+       m.country,
+       m.city,
+       m.category_name,
+       p.first_name,
+       p.last_name
+FROM iceberg_hive_rest.payment_db.raw_transaction_t t
+LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
+       ON t.merchant_id = m.merchant_id
+LEFT JOIN postgresql.public.card c
+ 		ON t.card_number = c.card_number
+LEFT JOIN postgresql.public.person p
+ 		ON c.person_id = p.person_id
+```
+
+> **What just happened?** In the last query, Trino joined an Iceberg table on RustFS (`raw_transaction_t`) with two live PostgreSQL tables (`card` and `person`) in a single query — without any ETL step. This federated capability makes Trino particularly useful for ad-hoc analysis before curation pipelines have run.
+
