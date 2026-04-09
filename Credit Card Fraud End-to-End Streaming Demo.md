@@ -15,7 +15,7 @@ The platform for this demo has been created using the [Platys - Platform in a bo
 ## Prerequisites
 
 - Docker and Docker Compose (16 - 32 GB RAM allocated to Docker recommended)
-- `dataplatform` added to `/etc/hosts` pointing to `127.0.0.1`
+- `dataplatform` added to `/etc/hosts` pointing to `127.0.0.1` or to the remote server, if the dataplatform runs on a remote server
 - Java 21 and Maven (only needed for the `lhbank-cardholder` service)
 - Get a license for [ShadowTraffic](https://shadowtraffic.io/) - there is a free trial version available
 - Run `./deploy.sh` once before starting to download the Iceberg Kafka Connect plugin and set up the truststore
@@ -71,7 +71,7 @@ This will begin populating `priv.pay.transaction.delta.v1` and `pub.ref.merchant
 
 **Goal:** Understand the structure of the source OLTP database that the `lhbank-cardholder` Spring Boot service writes to. This gives you a baseline understanding of what data will later be streamed into Kafka.
 
-The `lhbank-cardholder` service stores its data in a PostgreSQL database called `customer_db`. Before streaming this data anywhere, it helps to inspect the table structure directly. Run the following commands to explore the database schema and sample data:
+The `lhbank-cardholder` service stores its data in a PostgreSQL database called `customer_db`. Before "stream-enabling" this data, it helps to inspect the table structure directly. Run the following commands to explore the database schema and sample data:
 
 List all tables in the `customer_db` database:
 
@@ -79,9 +79,9 @@ List all tables in the `customer_db` database:
 docker exec -ti postgresql psql -d customer_db -U customer -c "\dt"
 ```
 
-> **What you should see:** A list of tables including `person`, `address`, `country`, `card`, and `outbox`. The `outbox` table is the key table used by the transactional outbox pattern (covered in section 02).
+> **What you should see:** A list of tables including `person`, `address`, `country`, `card`, and `outbox`. The `outbox` table is the key table used by the transactional outbox pattern (covered later in section 02). The other tables are part of the 3rd normal form data model of the CardHolder application.
 
-Preview the `person` and `address` tables:
+Lets preview part of the `person` and `address` tables:
 
 ```bash
 docker exec -ti postgresql psql -d customer_db -U customer -c "SELECT * FROM person LIMIT 10;"
@@ -109,6 +109,8 @@ Describe the `address` table:
 \d address
 ```
 
+If you perform a `SELECT COUNT(*) FROM person` a few times with some time inbetween you should see the count increase due to the new cardHolders created by the simulator. 
+
 > **What just happened?** You have confirmed that the source OLTP database is running and contains cardholder data. The `person` and `address` tables hold the core business data, while the `outbox` table (visible in `\dt`) will be used by Debezium in section 02 to propagate changes to Kafka without dual writes.
 
 ## 02 - Stream Enabling the CardHolder Application
@@ -124,13 +126,12 @@ This section demonstrates three approaches to capturing cardholder data changes 
 Kafka Connect is a framework for scalable and reliable data streaming between Kafka and other systems. It uses connector plugins — each connector handles the specifics of reading from or writing to a particular system. Before setting up any connectors, you can list the available connector plugins to confirm that the JDBC and Debezium connectors are installed:
 
 ```
-curl -X "GET" "$DOCKER_HOST_IP:8083/connector-plugins" | jq
+curl -X "GET" "dataplatform:8083/connector-plugins" | jq
 ```
 
 > **What you should see:** A JSON array of connector plugin objects. Look for entries containing `JdbcSourceConnector` and `PostgresConnector` — these are the connectors used in this section.
 
-* Kafka Connect UI: <http://dataplatform:28103>
-
+You can also use the Kafka Connect UI on <http://dataplatform:28103> to view the available connector plugins as well as start a connector and view it once it is running.
 
 ### Polling-based CDC using Kafka Connect JDBC Connector
 
@@ -153,7 +154,7 @@ docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create -
 Now register the JDBC source connector. It polls all four tables every 10 seconds using the `modified_at` timestamp column as a watermark:
 
 ```bash
-curl -X "POST" "$DATAPLATFORM_IP:8083/connectors" \
+curl -X "POST" "dataplatform:8083/connectors" \
      -H "Content-Type: application/json" \
      -d '{
   "name": "customer.jdbcsrc.query-based-cdc",
@@ -187,7 +188,7 @@ curl -X "POST" "$DATAPLATFORM_IP:8083/connectors" \
 Verify that person records are flowing into Kafka:
 
 ```bash
-kcat -b localhost -t priv.cus.person.cdc.v1 -q -r http://dataplatform:8081 -s value=avro
+kcat -b dataplatform -t priv.cus.person.cdc.v1 -q -r http://dataplatform:8081 -s value=avro
 ```
 
 > **What you should see:** A stream of Avro-encoded person records printed to the terminal. Each record corresponds to a row from the `person` table. Press `Ctrl+C` to stop.
@@ -233,7 +234,7 @@ curl -X PUT \
 Verify that person change events are flowing from the WAL:
 
 ```
-kcat -b localhost -t priv.person.dbz.v1 -r http://localhost:8081 -s value=avro -o end -q
+kcat -b dataplatform -t priv.person.dbz.v1 -r http://dataplatform:8081 -s value=avro -o end -q
 ```
 
 > **What you should see:** Debezium change event envelopes containing `before`, `after`, and `op` (operation) fields. The `op` field will be `c` for inserts, `u` for updates, and `d` for deletes. This is richer than the JDBC connector output, which only carries the current row state.
@@ -298,7 +299,7 @@ Writing to both the database and Kafka directly (dual write) is not safe: if the
 
 ### Virtual Outbox using View and database object-relational/json features
 
-An alternative to a physical outbox table is a virtual outbox implemented as a database view that projects the business tables into the same event structure. This avoids the overhead of writing to an extra table but still relies on log-based CDC to capture changes.
+An alternative to a physical outbox table is a virtual outbox implemented as a database view that projects the business tables into the same event structure. This avoids the overhead of writing to an extra table but will require the Polling-based CDC approach with a watermark column and increased latency.
 
 ![](./images/virtual-outbox.png)
 
@@ -326,7 +327,7 @@ Navigate to AKHQ: <http://dataplatform:28107> to view the `pub.ref.merchant.stat
 
 > **What you should see:** Individual merchant records in the topic, each keyed by `merchant_id`. The compacted retention policy means that for any given merchant, only the most recent record is kept — equivalent to a key-value store. Confirm that the topic has records before proceeding to section 06.
 
-## 05 - Provide Geonames data
+## 05 - Provide Geonames data (optional)
 
 **Goal:** Load city geolocation data into Kafka so that transaction city names can be enriched with latitude/longitude coordinates in section 06.
 
@@ -352,7 +353,8 @@ spark = (
 
         .config("spark.jars.packages",
                 "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
-                "org.apache.iceberg:iceberg-aws-bundle:1.10.1")
+                "org.apache.iceberg:iceberg-aws-bundle:1.10.1,"
+                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0")
 
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
@@ -426,6 +428,7 @@ from pyspark.sql.functions import to_json, struct, col
 
 # Select only the required fields and convert to JSON
 kafka_df = df.select(
+    col("name").alias("key"),          # Kafka message key
     to_json(
         struct(
             col("name"),
@@ -439,7 +442,7 @@ kafka_df = df.select(
 kafka_df.write \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "kafka-1:19092") \
-    .option("topic", "priv.ref.geonames.state.v1") \
+    .option("topic", "pub.ref.geonames.state.v1") \
     .save()
 ```
 
@@ -885,7 +888,7 @@ For S3 Object Stroage, we are using a software-defined solution called RustFS wh
 Navigate to <http://dataplatform:9005> and login as
 
 	* User: `admin`
-   * Password: `abc123abc123!`
+  * Password: `abc123abc123!`
 
 Check that there is already a bucket name `iceberg-bucket`. 
 
@@ -1179,9 +1182,10 @@ docker exec -ti spark-master spark-sql
 ```
 
 ```
-# either use `hiverest` or `watson`
-use hiverest;
-SELECT * FROM payment_db.raw_transaction_t;
+use hive_iceberg_rest;
+
+SELECT * FROM payment_db.raw_transaction_t
+LIMIT 10;
 ```
 
 > **What you should see:** Rows of transaction data. If the query returns zero rows, wait another 60 seconds (the connector commits every `iceberg.control.commit.interval-ms` = 60 000 ms) and try again. If it still returns no rows after a few minutes, check the Kafka Connect logs with `docker compose logs kafka-connect-1`.
