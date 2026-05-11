@@ -12,11 +12,16 @@ See [Upgrade to a new platform stack version](https://github.com/TrivadisPF/plat
  * RustFS
  * Lightdash
  * Minio Aistor
+ * Redis MCP
+ * Mongo MCP
+ * Neo4J MCP
+ * Postgresql MCP
+ * Better Chatbot
+ * CockroachDB
 
 ### Version upgrades
 
  * Update `langflow` to `1.7.3`
- * Update `n8n` to `2.7.5`
  * Update `ollama` to `0.16.3`
  * Update `opa` to `1.14.0` 
  * Update `opal` to `0.9.3`
@@ -27,6 +32,15 @@ See [Upgrade to a new platform stack version](https://github.com/TrivadisPF/plat
  * Update `zeppelin` to `0.12.0`
  * Update `lakefs` to `1.80`
  * Update `trino` to `480`
+ * Update `telegraf` to `1.38`
+ * Update `redis` to `8.2`
+ * Update `valkey` to `8.1.3`
+ * Update `neo4j` to `2026-community`
+ * Update `graphdb` to `11.3.2`
+ * Update `qdrant` to `1.17`
+ * Update `oracle-adb` to `26.2.4.2-26ai`
+ * Update `risingwave` to `v2.8.2`
+ * Update `nifi` to `2.9.0`
 
 ### Enhancements
 
@@ -38,6 +52,8 @@ See [Upgrade to a new platform stack version](https://github.com/TrivadisPF/plat
  
  * rename `SPARK_install_jars_packages` to `SPARK_install_java_packages`
  * new Trino/Starburst and Presto configuation for Hive S3 named to `hive.properties` - `minio.properties` is deprecated and will be removed in `1.21.0`
+ * rename `mcp-trino` to `trino-mcp`
+ * change from `neo4j-cypher-mcp` to `neo4j-mcp` (official one)
 
 ### Bug Fixes
 

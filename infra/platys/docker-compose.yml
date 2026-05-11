@@ -851,7 +851,7 @@ services:
         conda activate py312
         pip install ipykernel    
         python -m ipykernel install --user --name py312 --display-name "Python 3.12.8 (ipykernel)"
-        pip install pyspark==3.5.3 jupysql pandas arrow pyarrow grpcio-status boto3
+        conda run -n py312 pip install pyspark==3.5.3 jupysql pandas arrow pyarrow grpcio-status boto3
         start-notebook.sh
     restart: unless-stopped
   #  ================================== Lightdash ========================================== #
