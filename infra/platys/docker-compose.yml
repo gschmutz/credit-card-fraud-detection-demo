@@ -655,84 +655,6 @@ services:
       timeout: 10s
       retries: 10
       start_period: 20s
-  spark-worker-2:
-    image: bitnamilegacy/spark:3.5.3
-    container_name: spark-worker-2
-    hostname: spark-worker-2
-    labels:
-      com.platys.name: spark
-      com.platys.description: Spark Worker Node
-    depends_on:
-      spark-master:
-        condition: service_healthy
-    ports:
-      - 28112:28112
-    environment:
-      # bitnami env vars
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_RPC_AUTHENTICATION_ENABLED: no
-      SPARK_RPC_ENCRYPTION_ENABLED: no
-      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: no
-      SPARK_SSL_ENABLED: no
-      # spark standard env vars
-      SPARK_WORKER_WEBUI_PORT: '28112'
-      SPARK_WORKER_OPTS: -Dspark.worker.cleanup.enabled=true
-      SPARK_PUBLIC_DNS: ${PUBLIC_IP:-127.0.0.1}
-      # env vars for config files
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_impl: org.apache.hadoop.fs.s3a.S3AFileSystem
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_endpoint: http://rustfs-1:9000
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_access_key: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_secret_key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_s3a_path_style_access: 'true'
-      AWS_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      AWS_SECRET_ACCESS_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      SPARK_DEFAULTS_CONF_spark_hadoop_fs_defaultFS: s3a://admin-bucket
-      SPARK_DEFAULTS_CONF_spark_sql_warehouse_dir: s3a://admin-bucket/hive/warehouse
-      SPARK_DEFAULTS_CONF_spark_driver_extraJavaOptions:
-      SPARK_DEFAULTS_CONF_spark_executor_extraJavaOptions:
-      SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_jars: builtin
-      # SPARK_DEFAULTS_CONF_spark_sql_hive_metastore_version: 3.1.2    
-      SPARK_DEFAULTS_CONF_spark_sql_catalogImplementation: in-memory
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_spark__catalog: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions,
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg_uri: thrift://hive-metastore:9083
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg_warehouse: s3a://admin-bucket/iceberg/warehouse
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_type: rest
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest: org.apache.iceberg.spark.SparkCatalog
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_uri: http://hive-metastore:9084/iceberg
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_token: not_used
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_warehouse: s3a://admin-bucket/iceberg/warehouse
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_io___impl: org.apache.iceberg.aws.s3.S3FileIO
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_endpoint: http://rustfs-1:9000
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_path___style___access: true
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_access___key___id: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      SPARK_DEFAULTS_CONF_spark_sql_catalog_hive__iceberg__rest_s3_secret___access___key: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      SPARK_DEFAULTS_CONF_spark_sql_legacy_allowNonEmptyLocationInCTAS: 'true'
-      SPARK_DEFAULTS_CONF_spark_jars_repositories:
-      SPARK_DEFAULTS_CONF_spark_jars_packages: io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2
-      SPARK_DEFAULTS_CONF_spark_jars_excludes:
-      # specifies the JARs to be downloaded to the jars folder by maven-download-sh script
-      SPARK_INSTALL_JAVA_PACKAGES: ',io.delta:delta-spark_2.12:3.3.2,io.delta:delta-storage:3.3.2,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,org.apache.hudi:hudi-spark3.4-bundle_2.12:0.15.0'
-      SPARK_INSTALL_PYTHON_PACKAGES: ' delta-spark==3.3.2'
-      SPARK_DEFAULTS_CONF_spark_jars: /opt/bitnami/spark/jars/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
-      SPARK_DEFAULTS_CONF_spark_jars_ivySettings:
-    volumes:
-      - ./data-transfer:/data-transfer
-      - ./conf/spark/hive-site.xml:/opt/bitnami/spark/conf.default/hive-site.xml
-      - ./conf/spark/spark-defaults.conf:/opt/bitnami/spark/conf.default/spark-defaults.conf
-      - ./init/spark:/docker-entrypoint-initdb.d
-      - ./scripts/docker/maven-download.sh:/maven-download.sh
-      - ./container-volume/spark/logs/:/var/log/spark/logs
-    restart: unless-stopped
-    healthcheck:
-      test: [CMD-SHELL, "python3 -c 'import socket; socket.create_connection((\"localhost\", 28112), timeout=5)'"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 20s
   #  ================================== Apache Hive Metastore ========================================== #
   hive-metastore:
     image: trivadis/apache-hive:4.2.0-postgresql-standalone-metastore-s3
@@ -828,7 +750,7 @@ services:
       REMOVE_JARS: guava-14.0.1.jar
       # for awscli & s3cmd
       AWS_ACCESS_KEY_ID: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      AWS_SECRET_ACCESS_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
+      AWS_SECRET_ACCESS_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}}
       AWS_ENDPOINT: http://rustfs-1:9000
       AWS_REGION: us-east-1
       AWS_DEFAULT_REGION: us-east-1
@@ -851,90 +773,9 @@ services:
         conda activate py312
         pip install ipykernel    
         python -m ipykernel install --user --name py312 --display-name "Python 3.12.8 (ipykernel)"
-        pip install pyspark==3.5.3 jupysql pandas arrow pyarrow grpcio-status boto3
+        conda run -n py312 pip install pyspark==3.5.3 jupysql pandas arrow pyarrow grpcio-status boto3
         start-notebook.sh
     restart: unless-stopped
-  #  ================================== Lightdash ========================================== #
-  lightdash:
-    image: lightdash/lightdash:latest
-    platform: linux/amd64
-    hostname: lightdash
-    container_name: lightdash
-    labels:
-      com.platys.name: lightdash
-      com.platys.description: Open-source BI tool for dbt and SQL
-      com.platys.webui.title: Lightdash UI
-      com.platys.webui.url: http://dataplatform:28422
-    depends_on:
-      - postgresql
-    ports:
-      - 28422:8080
-    environment:
-      LIGHTDASH_SECRET: changeme-use-a-long-random-secret-here
-      PORT: 8080
-      SECURE_COOKIES: 'false'
-      TRUST_PROXY: 'false'
-      LIGHTDASH_LOG_LEVEL: info
-      PGHOST: postgresql
-      PGPORT: 5432
-      PGUSER: postgres
-      PGPASSWORD: abc123!
-      PGDATABASE: postgres
-      S3_ENDPOINT: http://rustfs-1:9000
-      S3_REGION: us-east-1
-      S3_ACCESS_KEY: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      S3_SECRET_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
-      S3_BUCKET:
-      S3_FORCE_PATH_STYLE: 'true'
-      #S3_EXPIRATION_TIME:
-      RESULTS_S3_REGION: us-east-1
-      RESULTS_S3_BUCKET:
-      RESULTS_S3_ACCESS_KEY: ${PLATYS_AWS_ACCESS_KEY:-admin}
-      RESULTS_S3_SECRET_KEY: ${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}§
-      LIGHTDASH_PROMETHEUS_ENABLED: true
-      LIGHTDASH_PROMETHEUS_PORT: 9090
-    volumes:
-      - ./data-transfer:/data-transfer
-      - ./scripts/docker/:/platys-scripts/
-    restart: unless-stopped
-  #  ================================== Elasticsearch ========================================== #
-  elasticsearch-1:
-    image: elasticsearch:8.19.10
-    hostname: elasticsearch-1
-    container_name: elasticsearch-1
-    labels:
-      com.platys.name: elasticsearch
-      com.platys.description: Search-engine NoSQL store
-      com.platys.restapi.title: Elasticsearch REST API
-      com.platys.restapi.url: http://dataplatform:9200
-      com.platys.manual.step.msgs: sudo sysctl -w vm.max_map_count=262144
-    ports:
-      - 9200:9200
-      - 9300:9300
-    environment:
-      discovery.type: single-node
-      xpack.security.enabled: false
-      xpack.monitoring.collection.enabled: 'false'
-      xpack.security.http.ssl.enabled: false
-      xpack.security.transport.ssl.enabled: false
-      http.cors.enabled: 'true'
-      http.cors.allow-origin: http://${DOCKER_HOST_IP:-localhost}:28275,http://${PUBLIC_IP:-127.0.0.1}:28275,http://dejavu:1358,http://dataplatform:28125,http://dataplatform:28125,http://${PUBLIC_IP:-127.0.0.1}:28125,http://${DOCKER_HOST_IP:-localhost}:28125,http://127.0.0.1:1358
-      http.cors.allow-headers: X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization
-      http.cors.allow-credentials: 'true'
-      cluster.routing.allocation.disk.threshold_enabled: 'true'
-      cluster.routing.allocation.disk.watermark.low: 2gb
-      cluster.routing.allocation.disk.watermark.high: 1gb
-      cluster.routing.allocation.disk.watermark.flood_stage: 512mb
-      ES_JAVA_OPTS: -Xms512m -Xmx512m
-    volumes:
-      - ./data-transfer:/data-transfer
-    restart: unless-stopped
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - curl -s http://localhost:9200/_cat/health?h=status | grep -q green
-      retries: 300
-      interval: 10s
   #  ================================== Prometheus ========================================== #
   prometheus-1:
     image: prom/prometheus:v3.9.1
@@ -1076,7 +917,6 @@ services:
       - ./conf/trino/catalog/iceberg-hive.properties:/catalog/iceberg_hive.properties
       - ./conf/trino/catalog/iceberg-hive-rest.properties:/catalog/iceberg_hive_rest.properties
       - ./conf/trino/catalog/postgresql.properties:/catalog/postgresql.properties
-      - ./conf/trino/catalog/elasticsearch.properties:/catalog/elasticsearch.properties
       - ./conf/trino/catalog/prometheus.properties:/catalog/prometheus.properties
       - ./custom-conf/trino/security:/etc/trino/security
     restart: unless-stopped
@@ -1122,12 +962,15 @@ services:
       - RUSTFS_ACCESS_KEY=${PLATYS_AWS_ACCESS_KEY:-admin}
       - RUSTFS_SECRET_KEY=${PLATYS_AWS_SECRET_ACCESS_KEY:-abc123abc123!}
       - RUSTFS_OBS_LOGGER_LEVEL=info
+      # Keep strict disk topology checks enabled by default.
+      # For local testing only, set `RUSTFS_UNSAFE_BYPASS_DISK_CHECK=true` explicitly.      
+      - RUSTFS_UNSAFE_BYPASS_DISK_CHECK=true
 #      - RUSTFS_TLS_PATH=/opt/tls
     volumes:
       - ./data-transfer:/data-transfer
     restart: unless-stopped
     healthcheck:
-      test: [CMD, sh, -c, curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health]
+      test: [CMD, sh, -c, curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9010/rustfs/console/health]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -1207,7 +1050,6 @@ services:
       - ./scripts/grafana/dashboards/kafka/kafka-stream.json:/etc/grafana/provisioning/dashboards/kafka/kafka-stream.json
       - ./scripts/grafana/dashboards/kafka/kafka-streams-rocksdb.json:/etc/grafana/provisioning/dashboards/kafka/kafka-streams-rocksdb.json
       - ./scripts/grafana/dashboards/kafka/OTel_kafkametrics.json:/etc/grafana/provisioning/dashboards/kafka/OTel_kafkametrics.json
-      - ./scripts/grafana/dashboards/elasticsearch:/etc/grafana/provisioning/dashboards/elasticsearch
       - ./scripts/grafana/dashboards/postgresql:/etc/grafana/provisioning/dashboards/postgresql
       - ./scripts/grafana/dashboards/spark:/etc/grafana/provisioning/dashboards/spark
       - ./scripts/grafana/dashboards/trino:/etc/grafana/provisioning/dashboards/trino

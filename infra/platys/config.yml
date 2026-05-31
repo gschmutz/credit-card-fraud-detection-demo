@@ -532,7 +532,7 @@
       SPARK_base_version: 3.5
       # "hive" or "in-memory"
       SPARK_catalog: in-memory
-      SPARK_workers: 2
+      SPARK_workers: 1
       # to restrict the default cores, use '-Dspark.deploy.defaultCores=6'
       SPARK_master_opts: ''
       SPARK_worker_cores:
@@ -1576,7 +1576,7 @@
       #
       # ===== Lightdash ========
       #
-      LIGHTDASH_enable: true
+      LIGHTDASH_enable: false
       LIGHTDASH_volume_map_dbt_project: false
       LIGHTDASH_dbt_project_path:
       LIGHTDASH_secret: 'changeme-use-a-long-random-secret-here'
@@ -1773,7 +1773,7 @@
       #
       # ===== Elasticsearch ========
       #
-      ELASTICSEARCH_enable: true
+      ELASTICSEARCH_enable: false
       ELASTICSEARCH_major_version: 8
       # one of 'oss', 'elastic',
       ELASTICSEARCH_edition: 'oss'
@@ -2078,7 +2078,7 @@
       # ===== SingleStore ========
       #
       SINGLE_STORE_enable: false
-      SINGLE_STORE_license:
+      SINGLE_STORE_license: 
       SINGLE_STORE_password: abc123!
       #
       # ===== Oracle XE RDBMS ========
