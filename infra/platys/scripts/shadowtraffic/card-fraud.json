@@ -321,6 +321,10 @@
                 },
                 "transaction_date": {
                     "_gen": "now"
+                    "avroHint": {
+        				"type": "long",
+        				"logicalType": "timestamp-millis"
+      				}    
                 }
             },
             "localConfigs": {
