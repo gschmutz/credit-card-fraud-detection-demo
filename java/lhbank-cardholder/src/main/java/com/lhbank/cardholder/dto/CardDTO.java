@@ -1,6 +1,4 @@
 package com.lhbank.cardholder.dto;
 
-import java.util.List;
-
-public record CardDTO(String number, String type, String expiryDate) {
+public record CardDTO(String cardHolderId, String number, String type, String expiryDate) {
 }

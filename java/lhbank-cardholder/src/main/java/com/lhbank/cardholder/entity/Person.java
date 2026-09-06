@@ -18,8 +18,8 @@ public class Person extends Auditable {
     private String phoneNumber;
     private String preferredContact;
     private String segment;
-    @OneToOne(cascade = CascadeType.ALL)
-    private Card card;
+    @OneToMany(mappedBy = "person", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Card> cards = new ArrayList<>();
     private Long avgTransactionalAmount;
 
     @Column(nullable = false, updatable = false)
@@ -95,12 +95,13 @@ public class Person extends Auditable {
         this.segment = segment;
     }
 
-    public Card getCard() {
-        return card;
+    public List<Card> getCards() {
+        return cards;
     }
 
-    public void setCard(Card card) {
-        this.card = card;
+    public void addCard(Card card) {
+        cards.add(card);
+        card.setPerson(this);
     }
 
     public Long getAvgTransactionalAmount() {

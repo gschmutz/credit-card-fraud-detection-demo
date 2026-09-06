@@ -12,7 +12,7 @@ protocol CardHolderProtocol {
 		string phone_number;
 		union { null, string } preferred_contact = null;
 		union { null, string } segment = null;
-		union { null, Card } card = null;
+		array<Card> cards;
 		long avg_transaction_amount;
 		
 		array<Address> addresses;

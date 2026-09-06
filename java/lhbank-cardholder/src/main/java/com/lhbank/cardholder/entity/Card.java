@@ -1,9 +1,6 @@
 package com.lhbank.cardholder.entity;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 
 @Entity
 public class Card extends Auditable {
@@ -15,6 +12,14 @@ public class Card extends Auditable {
     private String number;
     private String type;
     private String expiryDate;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "person_id", nullable = false)
+    private Person person;
+
+    public Long getId() {
+        return id;
+    }
 
     public String getNumber() {
         return number;
@@ -38,5 +43,13 @@ public class Card extends Auditable {
 
     public void setExpiryDate(String expiryDate) {
         this.expiryDate = expiryDate;
+    }
+
+    public Person getPerson() {
+        return person;
+    }
+
+    public void setPerson(Person person) {
+        this.person = person;
     }
 }

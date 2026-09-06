@@ -18,16 +18,22 @@ public class CardHolderConverter {
                 .build();
     }
 
+    private static com.lhbank.cardholder.avro.Card convertCard(com.lhbank.cardholder.entity.Card card) {
+        return com.lhbank.cardholder.avro.Card.newBuilder()
+                .setNumber(card.getNumber())
+                .setType(card.getType())
+                .setExpiryDate(card.getExpiryDate())
+                .build();
+    }
+
     public static CardHolderState convert(Person person) {
         List<com.lhbank.cardholder.avro.Address> addresses = person.getAddresses().stream()
                 .map(CardHolderConverter::convertAddress)
                 .collect(java.util.stream.Collectors.toCollection(() -> new java.util.ArrayList<>()));
 
-        com.lhbank.cardholder.avro.Card card = com.lhbank.cardholder.avro.Card.newBuilder()
-                .setNumber(person.getCard().getNumber())
-                .setType(person.getCard().getType())
-                .setExpiryDate(person.getCard().getExpiryDate())
-                .build();
+        List<com.lhbank.cardholder.avro.Card> cards = person.getCards().stream()
+                .map(CardHolderConverter::convertCard)
+                .collect(java.util.stream.Collectors.toList());
 
         return CardHolderState.newBuilder()
                 .setCardHolder(com.lhbank.cardholder.avro.CardHolder.newBuilder()
@@ -38,7 +44,7 @@ public class CardHolderConverter {
                         .setPhoneNumber(person.getPhoneNumber())
                         .setPreferredContact(person.getPreferredContact())
                         .setSegment(person.getSegment())
-                        .setCard(card)
+                        .setCards(cards)
                         .setAvgTransactionAmount(person.getAvgTransactionalAmount())
                         .setUsualCountries(person.getUsualCountries().stream()
                                 .map(Country::getName)

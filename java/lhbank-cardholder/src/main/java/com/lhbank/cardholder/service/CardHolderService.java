@@ -1,6 +1,5 @@
 package com.lhbank.cardholder.service;
 
-import com.lhbank.cardholder.entity.Card;
 import com.lhbank.cardholder.entity.Country;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,16 +69,8 @@ public class CardHolderService {
         person.setPhoneNumber(cardHolderDTO.phoneNumber());
         person.setPreferredContact(cardHolderDTO.preferredContact());
         person.setSegment(cardHolderDTO.segment());
-
-        var card = new Card();
-        card.setNumber(cardHolderDTO.card().number());
-        card.setType(cardHolderDTO.card().type());
-        card.setExpiryDate(cardHolderDTO.card().expiryDate());
-        person.setCard(card);
-
         person.setAvgTransactionalAmount(cardHolderDTO.avgTransactionAmount());
 
-        // attach addresses and ensure the bidirectional relationship is set
         for (var addressDTO : cardHolderDTO.addresses()) {
             var address = convert(addressDTO);
             person.addAddress(address);

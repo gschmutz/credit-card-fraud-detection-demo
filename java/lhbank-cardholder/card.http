@@ -1,0 +1,9 @@
+POST localhost:29000/api/cards
+Content-Type: application/json
+
+{
+  "cardHolderId": "cad4e633-d23e-9e95-97bb-909e7fa82e7d",
+  "number": "6524-2211-7337-4988",
+  "type": "discover",
+  "expiryDate": "2028-08-18"
+}

@@ -9,11 +9,6 @@ Content-Type: application/json
   "phoneNumber": "+1 413-925-9346",
   "preferredContact": "phone",
   "segment": "gold",
-  "card": {
-    "number": "6524-2211-7337-4988",
-    "type": "discover",
-    "expiryDate": "2028-08-18"
-  },
   "avgTransactionAmount": 175,
   "addresses": [
     {
