@@ -31,9 +31,6 @@ public class CardService {
     public Long addCard(CardDTO cardDTO) {
         LOGGER.info("addCard(cardHolderId={})", cardDTO.cardHolderId());
 
-        Person person = cardHolderRepository.findById(cardDTO.cardHolderId())
-                .orElseThrow(() -> new NoSuchElementException("CardHolder not found: " + cardDTO.cardHolderId()));
-
         var card = new Card();
         card.setNumber(cardDTO.number());
         card.setType(cardDTO.type());
@@ -42,6 +39,11 @@ public class CardService {
 
         cardRepository.save(card);
 
+        // retrieve person
+        Person person = cardHolderRepository.findById(cardDTO.cardHolderId())
+                .orElseThrow(() -> new NoSuchElementException("CardHolder not found: " + cardDTO.cardHolderId()));
+
+        // and publish state event
         cardHolderStateProducer.send(person);
         return card.getId();
     }
