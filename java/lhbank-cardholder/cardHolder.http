@@ -1,4 +1,4 @@
-POST 192.168.1.112:29000/api/cardHolders
+POST http://localhost:29000/api/cardHolders
 Content-Type: application/json
 
 {

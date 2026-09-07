@@ -3,6 +3,7 @@ package com.lhbank.cardholder.service;
 import com.lhbank.cardholder.dto.CardDTO;
 import com.lhbank.cardholder.entity.Card;
 import com.lhbank.cardholder.entity.Person;
+import com.lhbank.cardholder.eventproducer.CardHolderStateProducer;
 import com.lhbank.cardholder.repository.CardHolderRepository;
 import com.lhbank.cardholder.repository.CardRepository;
 import org.slf4j.Logger;
@@ -19,10 +20,12 @@ public class CardService {
 
     private final CardRepository cardRepository;
     private final CardHolderRepository cardHolderRepository;
+    private final CardHolderStateProducer cardHolderStateProducer;
 
-    public CardService(CardRepository cardRepository, CardHolderRepository cardHolderRepository) {
+    public CardService(CardRepository cardRepository, CardHolderRepository cardHolderRepository, CardHolderStateProducer cardHolderStateProducer) {
         this.cardRepository = cardRepository;
         this.cardHolderRepository = cardHolderRepository;
+        this.cardHolderStateProducer = cardHolderStateProducer;
     }
 
     public Long addCard(CardDTO cardDTO) {
@@ -38,6 +41,8 @@ public class CardService {
         person.addCard(card);
 
         cardRepository.save(card);
+
+        cardHolderStateProducer.send(person);
         return card.getId();
     }
 

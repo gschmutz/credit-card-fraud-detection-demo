@@ -1,4 +1,4 @@
-POST localhost:29000/api/cards
+POST http://localhost:29000/api/cards
 Content-Type: application/json
 
 {
