@@ -12,6 +12,29 @@ The data flow covers three entity domains:
 
 The platform for this demo has been created using the [Platys - Platform in a box](http://github.com/trivadispf/platys) toolkit.
 
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [00 - Starting the Platform](#00---starting-the-platform)
+- [01 - Credit Card Transaction Stream](#01-credit-card-transaction-stream)
+- [02 - Exploring Streams using Flink SQL with the Hive Metastore Catalog](#02-exploring-streams-using-flink-sql-with-the-hive-metastore-catalog)
+- [04 - Merchant Data](#04---merchant-data)
+- [05 - CardHolder Application (OLTP)](#05---cardholder-application-oltp)
+- [06 - Stream Enabling the CardHolder Application](#06---stream-enabling-the-cardholder-application)
+- [07 - Provide Geonames data (optional)](#07---provide-geonames-data-optional)
+- [08 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment](#08-fraud-detection---blocked-merchant-flagging-and-merchant-enrichment)
+- [09 - Fraud Detection - Enrich with CardHolder Data](#09-fraud-detection---enrich-with-cardholder-data)
+- [10 - Fraud Detection - Advanced Fraud Detection Patterns](#10-fraud-detection---advanced-fraud-detection-patterns)
+- [11 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect](#11---write-kafka-data-as-iceberg-tables-to-s3-object-storage-using-kafka-connect)
+- [12 - Validate the ingest by querying the Iceberg table using Spark SQL](#12---validate-the-ingest-by-querying-the-iceberg-table-using-spark-sql)
+- [13 - Using Spark to curate Transaction data](#13---using-spark-to-curate-transaction-data)
+- [14 - Curation Card Holder Data](#14---curation-card-holder-data)
+- [15 - Using Trino to query and curate](#15---using-trino-to-query-and-curate)
+
+## Table of Contents
+
+
+
 ## Prerequisites
 
 - Docker and Docker Compose (16 - 32 GB RAM allocated to Docker recommended)
@@ -67,7 +90,380 @@ This will begin populating `priv.pay.transaction.delta.v1` and `pub.ref.merchant
 
 > **What just happened?** ShadowTraffic reads the generator config in `scripts/shadowtraffic/card-fraud.json` and continuously produces realistic synthetic credit card transactions and merchant records to Kafka. Transactions include randomized card numbers, amounts, merchant IDs, channels, and dates. Merchant records include names, categories, cities, and countries.
 
-## 01 - CardHolder Application (OLTP)
+## 01 Credit Card Transaction Stream
+
+**Goal:** Confirm that the synthetic transaction stream is flowing through Kafka and learn how to inspect it using command-line tools and the AKHQ UI.
+
+Credit Card Transaction arrive as a real-time data stream / events. We can easily view the stream by using the following command:
+
+```bash
+kcat -b dataplatform -t priv.pay.transaction.delta.v1 -q -r http://dataplatform:8081 -s value=avro
+```
+
+> **What you should see:** A continuous stream of Avro-decoded transaction records, one per line, flowing to the terminal. Each record contains fields like `transaction_id`, `card_number`, `amount`, `merchant_id`, `channel`, and `transaction_date`. Press `Ctrl+C` to stop consuming. If nothing appears, confirm that the ShadowTraffic simulator from section 00 is still running.
+
+Navigate to AKHQ: <http://dataplatform:28107> to view the `priv.pay.transaction.delta.v1` topic.
+
+## 02 Exploring Streams using Flink SQL with the Hive Metastore Catalog
+
+[Apache Flink](https://flink.apache.org/) is an open-source distributed stream-processing framework designed for stateful computations over bounded and unbounded data streams. Unlike batch systems that process a fixed dataset and exit, Flink runs continuously — ingesting events as they arrive, maintaining state across them, and emitting results with low latency. It is fault-tolerant (via distributed checkpointing), horizontally scalable, and capable of exactly-once processing semantics.
+
+Flink exposes several APIs at different levels of abstraction; in this workshop we use **Flink SQL**, the highest-level interface. Flink SQL lets you write standard ANSI SQL queries — `SELECT`, `JOIN`, `GROUP BY`, window functions, pattern matching — that run as persistent streaming jobs on the cluster. You do not need to write Java or Python code.
+
+Before opening the SQL client, confirm the Flink version running on the cluster:
+
+```bash
+docker exec flink-sql-cli flink --version
+```
+
+```
+Version: 1.20.5, Commit ID: 0980485
+```
+
+Connect to the Flink SQL CLI:
+
+```bash
+docker exec -it flink-sql-cli ./bin/sql-client.sh
+```
+
+Out of the box, Flink uses the **`default_catalog`** — an in-memory catalog that is session-scoped. Table definitions stored here are available immediately but exist only for the lifetime of the current SQL client session. This makes the default catalog ideal for ad-hoc exploration.
+
+The Hive Metastore stores table DDL — schema, connector properties, partition metadata — in a relational database (PostgreSQL in this platform). Any Flink SQL client that connects to the same Metastore sees the same catalog, so a table defined in one session is immediately available in a fresh session, after a cluster restart, or from a different machine entirely.
+
+Lets create the catalog:
+
+```sql
+CREATE CATALOG hive_catalog WITH (
+    'type'          = 'hive',
+    'hive-conf-dir' = '/opt/hive-conf'
+);
+```
+
+> **Note on catalog persistence:** This platform is configured with `table.catalog-store.kind: file` (stored in `./conf/catalogs`). When you run `CREATE CATALOG`, Flink writes the catalog definition to that directory, so the catalog registration itself survives session restarts — you only need to run `CREATE CATALOG hive_catalog ...` **once**. On reconnect, Flink loads the definition automatically and the catalog is immediately available. The TABLE definitions inside the catalog are separately stored in the Hive Metastore database, which is also permanent. Both layers of metadata persist independently of the SQL client session.
+
+Set the catalog to the active one:
+
+```sql
+USE CATALOG hive_catalog;
+```
+
+List all databases within the Hive catalog:
+
+```sql
+SHOW DATABASES;
+```
+
+```bash
+Flink SQL> SHOW DATABASES;
++---------------+
+| database name |
++---------------+
+|       default |
++---------------+
+1 row in set
+```
+
+Create a new database & use it:
+
+```sql
+CREATE DATABASE IF NOT EXISTS fraud_detection;
+```
+
+```sql
+USE fraud_detection;
+```
+
+The `SHOW CURRENT` command is useful to orientate yourself in the session:
+
+To show the active catalog
+
+```sql
+SHOW CURRENT CATALOG;
+```
+
+```bash
+Flink SQL> SHOW CURRENT CATALOG;
++----------------------+
+| current catalog name |
++----------------------+
+|         hive_catalog |
++----------------------+
+```
+
+and to show the active database
+
+```sql
+SHOW CURRENT DATABASE;
+```
+
+```bash
+Flink SQL> SHOW CURRENT DATABASE;
++-----------------------+
+| current database name |
++-----------------------+
+|       fraud_detection |
++-----------------------+
+1 row in set
+```
+
+> **What you should see:** `hive_catalog` and `fraud_detection`.
+
+### Declare a virtual table over the transaction topic
+
+In Flink SQL, **every object is a `TABLE`**. A `CREATE TABLE` statement does not move or copy data — it declares how Flink should connect to an external system and how to interpret the records it reads. Whether the table behaves as an append-only stream or a keyed lookup depends on the connector and the presence of a primary key:
+
+- **Kafka connector** (`connector = 'kafka'`) — append-only source or sink; models an unbounded event stream
+- **Upsert-Kafka connector** (`connector = 'upsert-kafka'`) — changelog source or sink; holds the latest value per key and is suitable for lookups
+
+With the Hive catalog active, every `CREATE TABLE` statement is written to the Metastore and survives session restarts. 
+
+Create a table over the raw transaction topic:
+
+```sql
+CREATE TABLE IF NOT EXISTS pay_transaction_t (
+    transaction_id   STRING,
+    card_number      STRING,
+    merchant_id      STRING,
+    amount           DOUBLE,
+    currency         STRING,
+    channel          STRING,
+    transaction_date TIMESTAMP(3),
+    WATERMARK FOR transaction_date AS transaction_date - INTERVAL '5' SECOND
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'priv.pay.transaction.delta.v1',
+    'properties.bootstrap.servers' = 'kafka-1:19092',
+    'properties.group.id'          = 'flink-pay-transaction',
+    'scan.startup.mode'            = 'earliest-offset',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schema-registry-1:8081'
+);
+```
+
+> **Key properties:**
+> - `scan.startup.mode = 'earliest-offset'` — replay the topic from the beginning, so you see all records already produced by ShadowTraffic before you connected
+> - `WATERMARK FOR transaction_date AS transaction_date - INTERVAL '5' SECOND` — tells Flink's event-time engine to allow up to 5 seconds of out-of-order arrival before closing a time window; required for window aggregations
+
+Confirm the table appears in the catalog:
+
+```sql
+SHOW TABLES;
+```
+
+```
+Flink SQL> SHOW TABLES;
++-------------------+
+|        table name |
++-------------------+
+| pay_transaction_t |
++-------------------+
+1 row in set
+```
+
+### Query the live stream
+
+Query the table to see records arriving in real time:
+
+```sql
+SELECT * FROM pay_transaction_t;
+```
+
+You should see an output similar to the one below:
+
+![](./images/flink-sql-streaming-result.png)
+
+> **What just happened?** Unlike a database `SELECT` that returns a fixed result set and exits, this query runs as a continuous streaming job. Every new record produced by ShadowTraffic to the Kafka topic immediately appears as a new row in the terminal output. The query will run indefinitely until you stop it.
+
+Press **Q** or **Ctrl-C** to stop the query.
+
+Set the result display mode to `tableau` so streaming output renders as a continuously updating table in the terminal:
+
+```sql
+SET 'sql-client.execution.result-mode' = 'tableau';
+```
+
+And re-execute the same SELECT:
+
+```sql
+SELECT * FROM pay_transaction_t;
+```
+
+> The default mode (`table`) renders results page by page and requires you to scroll. `tableau` streams rows to the terminal as they arrive, which is much more useful for live queries.
+
+### Incremental aggregation
+
+Flink can maintain running aggregates that update with each new event. This query counts how many transactions each card number has produced so far:
+
+```sql
+SELECT card_number, COUNT(*) AS nof
+FROM pay_transaction_t
+GROUP BY card_number;
+```
+
+> **What just happened?** Flink maintains a count in memory for each distinct `card_number`. Each time a new transaction arrives for a card, Flink emits an updated row with the new total — you can watch the counts climb in real time. This is an unbounded aggregation: there is no time window, so Flink accumulates state for every card it has ever seen.
+
+Press **Ctrl-C** to stop.
+
+### Tumbling window aggregation
+
+An unbounded `GROUP BY` accumulates state forever. For fraud detection, what matters is *recent* activity — a burst of transactions within the last few minutes is suspicious even if the card's all-time total is normal. **Tumbling windows** divide the stream into fixed, non-overlapping time buckets and emit one result per bucket once the bucket closes.
+
+```sql
+SELECT
+    window_start,
+    window_end,
+    card_number,
+    COUNT(*)    AS nof,
+    SUM(amount) AS total_amount
+FROM TABLE(
+    TUMBLE(TABLE pay_transaction_t, DESCRIPTOR(transaction_date), INTERVAL '1' MINUTE)
+)
+GROUP BY window_start, window_end, card_number;
+```
+
+> **What just happened?** `TUMBLE(..., INTERVAL '1' MINUTE)` partitions `pay_transaction_t` into one-minute buckets using `transaction_date` as the event-time clock. When the watermark advances past the end of a bucket (i.e., Flink is confident no more late records can arrive for that minute), the bucket closes and Flink emits one row per card showing the transaction count and total spend for that window.
+
+Add a `HAVING` clause to surface only cards with more than one transaction in a single minute — a simple velocity signal:
+
+```sql
+SELECT
+    window_start,
+    window_end,
+    card_number,
+    COUNT(*)    AS nof,
+    SUM(amount) AS total_amount
+FROM TABLE(
+    TUMBLE(TABLE pay_transaction_t, DESCRIPTOR(transaction_date), INTERVAL '1' MINUTE)
+)
+GROUP BY window_start, window_end, card_number
+HAVING COUNT(*) > 1;
+```
+
+> **What just happened?** Only windows where a single card generated more than one transaction in the same minute are emitted. Because ShadowTraffic produces transactions quickly, most cards will appear here — in production you would tune the threshold and window size to match expected legitimate traffic patterns.
+
+Press **Ctrl-C** to stop any running query. 
+
+Now prove the definition persists across sessions:
+
+```sql
+EXIT;
+```
+
+```bash
+docker exec -it flink-sql-cli ./bin/sql-client.sh
+```
+
+```sql
+USE CATALOG hive_catalog;
+USE fraud_detection;
+SHOW TABLES;
+```
+
+> **What you should see:** `pay_transaction_t` — no `CREATE TABLE` statement needed, and no `CREATE CATALOG` either. Because this platform uses a file-based catalog store, both the catalog registration and the table DDL survived the session restart intact. From this point on, every SQL statement in this workshop assumes the Hive catalog and `fraud_detection` database are active. Additional tables will be registered as each pipeline step is introduced.
+
+This is due to the configuration of the Hive Metastore catalog. Flink ships with [three catalog types](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/catalogs/#catalog-types):
+
+| Catalog type | Persistence | Can create new objects? | Best for |
+|---|---|---|---|
+| **In-memory** (`default_catalog`) | Session only | Yes | Ad-hoc exploration |
+| **Hive Metastore** | Permanent — stored in the Metastore DB | Yes | Production pipelines |
+| **JDBC** | Permanent — but read-only view of an existing DB | No | Querying existing tables |
+
+
+Querying the raw transaction stream already reveals patterns, but a `merchant_id` alone is not enough to flag fraud or explain it. The next sections bring in the reference data — merchants and cardholders — that the detection pipeline needs to make decisions and produce actionable alerts.
+
+## 04 - Merchant Data
+
+**Goal:** Stream merchant reference data from a legacy application database into Kafka using Debezium log-based CDC, and understand why that data is needed in two places in the fraud detection pipeline: blocking transactions at suspicious merchants and enriching flagged transactions with human-readable context.
+
+Merchant data drives two distinct steps in this pipeline, and both require the same reference dataset to be continuously available as a Kafka topic:
+
+**1. Blocking — merchant blacklist join (section 06)**
+Fraud operations teams maintain lists of merchants associated with fraudulent activity. Every incoming transaction is checked against this blacklist via a real-time stream-table join on `merchant_id` — a match flags the transaction immediately. The merchant reference data provides the stable set of IDs that blacklist entries refer to.
+
+**2. Enrichment — adding context to flagged transactions (section 06)**
+A raw transaction carries only a `merchant_id` foreign key. Analysts need human-readable context — merchant name, city, country, and category — to act on a flag without manual lookup. Joining each transaction against the merchant reference table adds exactly that.
+
+Merchant data lives in a legacy application's PostgreSQL database. Before stream-enabling it, confirm that the data is there by querying the table directly:
+
+```bash
+docker exec -ti postgresql psql -U postgres -c "SELECT * FROM merchant LIMIT 10;"
+```
+
+and you should see data similar to shown below
+
+```bash
+ merchant_id |              name               | country |       city       |     category_name      | status
+-------------+---------------------------------+---------+------------------+------------------------+--------
+ merchant-0  | Mraz LLC                        | US      | New Johnnieview  | Baby, Beauty & Jewelry | ACTIVE
+ merchant-1  | Altenwerth LLC                  | US      | Earleville       | Electronics            | ACTIVE
+ merchant-2  | MacGyver-Lowe                   | US      | Leonardoborough  | Jewelry & Tools        | ACTIVE
+ merchant-3  | Hartmann and Sons               | US      | North German     | Music                  | ACTIVE
+ merchant-4  | Nikolaus, Krajcik and Dickinson | US      | Patrickstad      | Music                  | ACTIVE
+ merchant-5  | Kessler, Corkery and Klocko     | US      | West Malcolmstad | Movies                 | ACTIVE
+ merchant-6  | Bernhard-Mayert                 | US      | Tishahaven       | Computers              | ACTIVE
+ merchant-7  | Cremin and Sons                 | US      | New Rodrigoland  | Beauty & Grocery       | ACTIVE
+ merchant-8  | Gislason-Crona                  | US      | Hannahfort       | Games & Jewelry        | ACTIVE
+ merchant-9  | Legros, Tremblay and Marks      | US      | Yukburgh         | Beauty & Books         | ACTIVE
+(10 rows)
+```
+
+> **What you should see:** Rows with `merchant_id`, `name`, `country`, `city`, `category_name`, and `status` columns. If the table is empty, confirm that ShadowTraffic is running and has completed its seeding stage.
+
+Rather than modifying the application to publish to Kafka directly (dual-write risk), we use the **Debezium PostgreSQL connector running inside Kafka Connect** to tail the database's write-ahead log (WAL) and capture every insert and update from the `merchant` table without touching application code. Debezium streams those changes through Kafka Connect into the `pub.ref.merchant.state.v1` Kafka topic — a compacted topic that retains only the latest value per `merchant_id` key, making it equivalent to a continuously updated key-value store. Each record carries the fields `merchant_id`, `name`, `country`, `city`, `category_name` and `status`.
+
+### What is Kafka Connect
+
+![](./images/kafka-connect.png)
+
+Kafka Connect is a framework for scalable and reliable data streaming between Kafka and other systems. It uses connector plugins — each connector handles the specifics of reading from or writing to a particular system. Before setting up any connectors, you can list the available connector plugins to confirm that the JDBC and Debezium connectors are installed:
+
+```
+curl -X "GET" "dataplatform:8083/connector-plugins" | jq
+```
+
+> **What you should see:** A JSON array of connector plugin objects. Look for entries containing `JdbcSourceConnector` and `PostgresConnector` — these are the connectors used in this section.
+
+You can also use the Kafka Connect UI on <http://dataplatform:28103> to view the available connector plugins as well as start a connector and view it once it is running.
+
+### Using the Debezium PostgreSQL connector 
+
+Register the Debezium Kafka Connect connector by running [this scirpt](./scripts/kafka-connect/start-cdc-merchant.sh):
+
+```bash
+scripts/kafka-connect/start-cdc-merchant.sh
+```
+
+The connector configuration does several things worth noting:
+
+- **`table.include.list: public.merchant`** — scopes the connector to only the `merchant` table so unrelated tables in the same database are ignored.
+- **`plugin.name: pgoutput`** — uses PostgreSQL's built-in logical replication output plugin, which requires no extra installation.
+- **`topic.creation.default.cleanup.policy: compact`** — tells Kafka to retain only the latest record per key, so the topic always reflects current merchant state rather than accumulating every historical change.
+- **`transforms: unwrap, extractKey, dropPrefix`** — three chained Single Message Transforms (SMTs) applied to every event in order:
+  1. **`unwrap` (`ExtractNewRecordState`)** — Debezium wraps each change in an envelope containing `before`, `after`, `op` (operation), and metadata fields. This SMT strips the envelope and passes through only the `after` value — the current row state — which is all downstream consumers need.
+  2. **`extractKey` (`ExtractField$Key`)** — by default the Kafka message key is the full primary-key struct `{merchant_id: "merchant-36"}`. This SMT extracts just the `merchant_id` string so the key is a plain `merchant-36` — easier to use in stream-table joins.
+  3. **`dropPrefix` (`RegexRouter`)** — Debezium names topics `<prefix>.<schema>.<table>`, which here would be `ref.public.merchant`. The regex router renames it to `pub.ref.merchant.state.v1` to match the naming convention used across the rest of the platform.
+
+Verify the connector registered successfully and data is arriving in the Kafka topic:
+
+```bash
+docker exec -ti kcat kcat -b kafka-1:19092 -t pub.ref.merchant.state.v1 -r http://schema-registry-1:8081 -s key=s -s value=avro -f '%k: %s\n' -q
+```
+
+and you will see the avro data formatted as JSON:
+
+```bash
+merchant-187: {"merchant_id": "merchant-187", "name": {"string": "Christiansen, Wisoky and Weber"}, "country": {"string": "US"}, "city": {"string": "New Latashiabury"}, "category_name": {"string": "Books"}, "status": {"string": "ACTIVE"}}
+merchant-189: {"merchant_id": "merchant-189", "name": {"string": "Effertz Group"}, "country": {"string": "US"}, "city": {"string": "Metzville"}, "category_name": {"string": "Books, Electronics & Games"}, "status": {"string": "ACTIVE"}}
+merchant-191: {"merchant_id": "merchant-191", "name": {"string": "Will, Braun and Gaylord"}, "country": {"string": "US"}, "city": {"string": "Adolfoport"}, "category_name": {"string": "Shoes"}, "status": {"string": "ACTIVE"}}
+merchant-193: {"merchant_id": "merchant-193", "name": {"string": "MacGyver, Cassin and Johnson"}, "country": {"string": "US"}, "city": {"string": "Hyattchester"}, "category_name": {"string": "Shoes"}, "status": {"string": "ACTIVE"}}
+merchant-195: {"merchant_id": "merchant-195", "name": {"string": "Bechtelar Group"}, "country": {"string": "US"}, "city": {"string": "Kareemstad"}, "category_name": {"string": "Beauty & Jewelry"}, "status": {"string": "ACTIVE"}}
+merchant-198: {"merchant_id": "merchant-198", "name": {"string": "Brakus-Schowalter"}, "country": {"string": "US"}, "city": {"string": "New Laurie"}, "category_name": {"string": "Electronics"}, "status": {"string": "ACTIVE"}}
+```
+
+> **What you should see:** Merchant records keyed by plain `merchant_id` strings (e.g. `merchant-187`), with a flat JSON or Avro value containing the current row fields. If the topic is empty, confirm that the `merchant` table in PostgreSQL has rows and that the connector status is `RUNNING` in Kafka Connect.
+
+## 05 - CardHolder Application (OLTP)
 
 **Goal:** Understand the structure of the source OLTP database that the `lhbank-cardholder` Spring Boot service writes to. This gives you a baseline understanding of what data will later be streamed into Kafka.
 
@@ -113,85 +509,19 @@ If you perform a `SELECT COUNT(*) FROM person` a few times with some time inbetw
 
 > **What just happened?** You have confirmed that the source OLTP database is running and contains cardholder data. The `person` and `address` tables hold the core business data, while the `outbox` table (visible in `\dt`) will be used by Debezium in section 02 to propagate changes to Kafka without dual writes.
 
-## 02 - Stream Enabling the CardHolder Application
+## 06 - Stream Enabling the CardHolder Application
 
-**Goal:** Capture cardholder data changes from PostgreSQL into Kafka topics using Kafka Connect. You will compare three CDC approaches — polling, log-based, and the transactional outbox pattern — and understand when to use each.
+**Goal:** Capture cardholder data changes from PostgreSQL into Kafka topics using Kafka Connect. 
 
-This section demonstrates three approaches to capturing cardholder data changes from PostgreSQL into Kafka, each with different trade-offs. We will use various Kafka Connect connectors. 
+Stream-enabling a OLTP application is a common integration challenge, and the right approach depends on how much control you have over the application code. This section covers two solutions:
 
-### What is Kafka Connect
+**1. Log-based CDC with Debezium**
+The same technique used for merchant data. Debezium tails the PostgreSQL write-ahead log (WAL) and captures every row-level change from the cardholder tables — no application changes required. This works well when the source tables have a stable schema and you want to capture all change types (inserts, updates, deletes) with minimal latency.
 
-![](./images/kafka-connect.png)
+**2. Transactional Outbox Pattern**
+A more robust approach for applications you own and can modify. The `lhbank-cardholder` service writes a business event into an `outbox` table in the same database transaction as the business write. Debezium then captures only the outbox rows and routes them to Kafka. This guarantees exactly-once delivery semantics, gives full control over the event payload and schema, and avoids exposing internal table structure to consumers.
 
-Kafka Connect is a framework for scalable and reliable data streaming between Kafka and other systems. It uses connector plugins — each connector handles the specifics of reading from or writing to a particular system. Before setting up any connectors, you can list the available connector plugins to confirm that the JDBC and Debezium connectors are installed:
-
-```
-curl -X "GET" "dataplatform:8083/connector-plugins" | jq
-```
-
-> **What you should see:** A JSON array of connector plugin objects. Look for entries containing `JdbcSourceConnector` and `PostgresConnector` — these are the connectors used in this section.
-
-You can also use the Kafka Connect UI on <http://dataplatform:28103> to view the available connector plugins as well as start a connector and view it once it is running.
-
-### Polling-based CDC using Kafka Connect JDBC Connector
-
-Polling-based CDC periodically queries the source tables using a watermark column (`modified_at`). It is simple to set up but introduces latency proportional to the poll interval and cannot capture deletes.
-
-![](./images/polling-based-cdc.png)
-
-First, create the target Kafka topics that the JDBC connector will write to:
-
-```bash
-docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.cus.person.cdc.v1 --partitions 2 --replication-factor 3
-
-docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.cus.address.cdc.v1 --partitions 2 --replication-factor 3
-
-docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.cus.country.cdc.v1 --partitions 2 --replication-factor 3
-
-docker exec -ti kafka-1 kafka-topics --bootstrap-server kafka-1:19092 --create --topic priv.cus.card.cdc.v1 --partitions 2 --replication-factor 3
-```
-
-Now register the JDBC source connector. It polls all four tables every 10 seconds using the `modified_at` timestamp column as a watermark:
-
-```bash
-curl -X "POST" "dataplatform:8083/connectors" \
-     -H "Content-Type: application/json" \
-     -d '{
-  "name": "customer.jdbcsrc.query-based-cdc",
-  "config": {
-    "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
-    "name": "customer.jdbcsrc.query-based-cdc",
-    "tasks.max": "1",
-    "connection.url": "jdbc:postgresql://postgresql/customer_db?user=customer&password=abc123!",
-    "mode": "timestamp",
-    "timestamp.column.name": "modified_at",
-    "poll.interval.ms": "10000",
-    "table.whitelist": "public.person, public.address, public.country, public.card",
-    "validate.non.null": "false",
-    "topic.prefix": "priv.cus.",
-    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
-    "key.converter.schemas.enable": "false",
-    "value.converter": "io.confluent.connect.avro.AvroConverter",
-    "value.converter.schema.registry.url": "http://schema-registry-1:8081",    
-    "transforms": "createKey,extractInt,addSuffix",
-    "transforms.createKey.type": "org.apache.kafka.connect.transforms.ValueToKey",
-    "transforms.createKey.fields": "id",
-    "transforms.extractInt.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
-    "transforms.extractInt.field": "id",
-    "transforms.addSuffix.type": "org.apache.kafka.connect.transforms.RegexRouter",
-    "transforms.addSuffix.regex": ".*",
-    "transforms.addSuffix.replacement": "$0.cdc.v1"
-  }
-}'
-```
-
-Verify that person records are flowing into Kafka:
-
-```bash
-kcat -b dataplatform -t priv.cus.person.cdc.v1 -q -r http://dataplatform:8081 -s value=avro
-```
-
-> **What you should see:** A stream of Avro-encoded person records printed to the terminal. Each record corresponds to a row from the `person` table. Press `Ctrl+C` to stop.
+Both approaches use the Debezium PostgreSQL connector running inside Kafka Connect — the difference is in *what* Debezium reads and *how* the event payload is shaped.
 
 ### Log-based CDC using Debezium and Kafka Connect
 
@@ -201,6 +531,7 @@ Log-based CDC reads directly from the PostgreSQL write-ahead log (WAL) via the `
 
 Register the Debezium PostgreSQL connector for log-based CDC. Unlike the JDBC connector above, this connector tails the WAL and does not need a watermark column — it captures every row-level change in real time:
 
+`start-cdc-cardholder.sh`
 ```
 curl -X PUT \
   "http://$DATAPLATFORM_IP:8083/connectors/customer.dbzsrc.log-based-cdc/config" \
@@ -209,7 +540,7 @@ curl -X PUT \
   -d '{
   "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
   "tasks.max": "1",
-  "slot.name":"dbzlogbased",
+  "slot.name":"dbzlogbased2",
   "database.server.name": "postgresql",
   "database.port": "5432",
   "database.user": "customer",
@@ -221,7 +552,8 @@ curl -X PUT \
   "topic.prefix": "customer",  
   "tombstones.on.delete": "false",
   "database.hostname": "postgresql",
-  "transforms":"dropPrefix",  
+  "transforms":"unwrap,dropPrefix",
+  "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
   "transforms.dropPrefix.type": "org.apache.kafka.connect.transforms.RegexRouter",  
   "transforms.dropPrefix.regex": "customer.public.(.*)",  
   "transforms.dropPrefix.replacement": "priv.$1.dbz.v1",
@@ -237,7 +569,7 @@ Verify that person change events are flowing from the WAL:
 kcat -b dataplatform -t priv.person.dbz.v1 -r http://dataplatform:8081 -s value=avro -o end -q
 ```
 
-> **What you should see:** Debezium change event envelopes containing `before`, `after`, and `op` (operation) fields. The `op` field will be `c` for inserts, `u` for updates, and `d` for deletes. This is richer than the JDBC connector output, which only carries the current row state.
+> **What you should see:** One Kafka topic per source table — `priv.person.dbz.v1`, `priv.address.dbz.v1`, `priv.card.dbz.v1`, `priv.country.dbz.v1`. This is third normal form (3NF) reflected directly in the topic design: the topics mirror the relational table structure one-to-one. The implication is that any schema change in the database — a column rename, a new field, a type change — immediately affects the corresponding topic. That tight coupling to the source schema is exactly why these topics are **private** (`priv.` prefix): they are internal CDC artefacts, not stable contracts for external consumers. Downstream teams should consume from the enriched or outbox-derived topics (`pub.*`), which have controlled, versioned schemas.
 
 ### Transactional Outbox Pattern using Debezium and Kafka Connect
 
@@ -247,6 +579,7 @@ The transactional outbox pattern is used by the `lhbank-cardholder` Spring Boot 
 
 First start the `lhbank-cardholder` service (or use the Docker Compose override), then register the connector:
 
+`start-outbox-cardholder.sh`
 ```
 curl -X PUT \
   "http://$DATAPLATFORM_IP:8083/connectors/cardHolder.dbzsrc.outbox/config" \
@@ -303,31 +636,7 @@ An alternative to a physical outbox table is a virtual outbox implemented as a d
 
 ![](./images/virtual-outbox.png)
 
-## 03 Payment App - Credit Card Transaction Stream
-
-**Goal:** Confirm that the synthetic transaction stream is flowing through Kafka and learn how to inspect it using command-line tools and the AKHQ UI.
-
-Credit Card Transaction arrive as a real-time data stream / events. We can easily view the stream by using the following command:
-
-```bash
-kcat -b dataplatform -t priv.pay.transaction.delta.v1 -q -r http://dataplatform:8081 -s value=avro
-```
-
-> **What you should see:** A continuous stream of Avro-decoded transaction records, one per line, flowing to the terminal. Each record contains fields like `transaction_id`, `card_number`, `amount`, `merchant_id`, `channel`, and `transaction_date`. Press `Ctrl+C` to stop consuming. If nothing appears, confirm that the ShadowTraffic simulator from section 00 is still running.
-
-Navigate to AKHQ: <http://dataplatform:28107> to view the `priv.pay.transaction.delta.v1` topic.
-
-## 04 - Merchant Data
-
-**Goal:** Confirm that merchant reference data is available as a Kafka topic and understand its role in later enrichment steps.
-
-Merchant data is directly made available as a state topic in Kafka. The `pub.ref.merchant.state.v1` topic is a compacted topic (meaning Kafka retains only the latest value per key), which makes it ideal for use as a lookup table in ksqlDB stream-table joins. Each record represents a merchant and includes fields such as `merchant_id`, `name`, `country`, `city`, and `category_name`. These fields will be joined onto transaction records in section 06 to add context to flagged transactions.
-
-Navigate to AKHQ: <http://dataplatform:28107> to view the `pub.ref.merchant.state.v1` topic.
-
-> **What you should see:** Individual merchant records in the topic, each keyed by `merchant_id`. The compacted retention policy means that for any given merchant, only the most recent record is kept — equivalent to a key-value store. Confirm that the topic has records before proceeding to section 06.
-
-## 05 - Provide Geonames data (optional)
+## 07 - Provide Geonames data (optional)
 
 **Goal:** Load city geolocation data into Kafka so that transaction city names can be enriched with latitude/longitude coordinates in section 06.
 
@@ -341,48 +650,58 @@ Start a Spark session configured to talk to both RustFS (for reading the GeoName
 
 ```python
 import os
+
 # get the accessKey and secretKey from Environment
-accessKey = os.environ['AWS_ACCESS_KEY_ID']
-secretKey = os.environ['AWS_SECRET_ACCESS_KEY']
+accessKey = os.environ["AWS_ACCESS_KEY_ID"]
+secretKey = os.environ["AWS_SECRET_ACCESS_KEY"]
 
 from pyspark.sql import SparkSession
+
 spark = (
-    SparkSession.builder
-        .appName("Jupyter")
-        .master("spark://spark-master:7077")
-
-        .config("spark.jars.packages",
-                "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
-                "org.apache.iceberg:iceberg-aws-bundle:1.10.1,"
-                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0")
-
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.access.key", accessKey)
-        .config("spark.hadoop.fs.s3a.secret.key", secretKey)
-        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
-
-        # ==== Iceberg catalog (Hive Metastore Iceberg REST Catalog) ===
-        .config("spark.sql.catalog.hive_iceberg_rest", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.hive_iceberg_rest.type", "rest")
-        .config("spark.sql.catalog.hive_iceberg_rest.uri", "http://hive-metastore:9084/iceberg")
-        .config("spark.sql.catalog.hive_iceberg_rest.warehouse", "s3a://admin-bucket/iceberg/warehouse")
-        .config("spark.sql.catalog.hive_iceberg_rest.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.endpoint", "http://rustfs-1:9000")
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.access-key-id", accessKey)
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.secret-access-key", secretKey)
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.path-style-access", "true")
-    
-        # use "hive_iceberg" as the default catalog
-        .config("spark.sql.defaultCatalog", "hive_iceberg_rest")
-
-        .config(
-            "spark.sql.extensions",
-            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
-        )
-
-        .getOrCreate()
+    SparkSession.builder.appName("Jupyter")
+    .master("spark://spark-master:7077")
+    .config(
+        "spark.jars.packages",
+        "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
+        "org.apache.iceberg:iceberg-aws-bundle:1.10.1,"
+        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
+    )
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+    .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
+    .config("spark.hadoop.fs.s3a.path.style.access", "true")
+    .config("spark.hadoop.fs.s3a.access.key", accessKey)
+    .config("spark.hadoop.fs.s3a.secret.key", secretKey)
+    .config(
+        "spark.hadoop.fs.s3a.aws.credentials.provider",
+        "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+    )
+    # ==== Iceberg catalog (Hive Metastore Iceberg REST Catalog) ===
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest", "org.apache.iceberg.spark.SparkCatalog"
+    )
+    .config("spark.sql.catalog.hive_iceberg_rest.type", "rest")
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.uri", "http://hive-metastore:9084/iceberg"
+    )
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.warehouse",
+        "s3a://admin-bucket/iceberg/warehouse",
+    )
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.io-impl",
+        "org.apache.iceberg.aws.s3.S3FileIO",
+    )
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.endpoint", "http://rustfs-1:9000")
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.access-key-id", accessKey)
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.secret-access-key", secretKey)
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.path-style-access", "true")
+    # use "hive_iceberg" as the default catalog
+    .config("spark.sql.defaultCatalog", "hive_iceberg_rest")
+    .config(
+        "spark.sql.extensions",
+        "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+    )
+    .getOrCreate()
 )
 ```
 
@@ -391,33 +710,34 @@ Read the GeoNames TSV file from RustFS, applying the full 19-column schema:
 ```python
 from pyspark.sql.types import *
 
-schema = StructType([
-    StructField("geonameid", LongType()),
-    StructField("name", StringType()),
-    StructField("asciiname", StringType()),
-    StructField("alternatenames", StringType()),
-    StructField("latitude", DoubleType()),
-    StructField("longitude", DoubleType()),
-    StructField("feature_class", StringType()),
-    StructField("feature_code", StringType()),
-    StructField("country_code", StringType()),
-    StructField("cc2", StringType()),
-    StructField("admin1_code", StringType()),
-    StructField("admin2_code", StringType()),
-    StructField("admin3_code", StringType()),
-    StructField("admin4_code", StringType()),
-    StructField("population", LongType()),
-    StructField("elevation", IntegerType()),
-    StructField("dem", IntegerType()),
-    StructField("timezone", StringType()),
-    StructField("modification_date", StringType())
-])
+schema = StructType(
+    [
+        StructField("geonameid", LongType()),
+        StructField("name", StringType()),
+        StructField("asciiname", StringType()),
+        StructField("alternatenames", StringType()),
+        StructField("latitude", DoubleType()),
+        StructField("longitude", DoubleType()),
+        StructField("feature_class", StringType()),
+        StructField("feature_code", StringType()),
+        StructField("country_code", StringType()),
+        StructField("cc2", StringType()),
+        StructField("admin1_code", StringType()),
+        StructField("admin2_code", StringType()),
+        StructField("admin3_code", StringType()),
+        StructField("admin4_code", StringType()),
+        StructField("population", LongType()),
+        StructField("elevation", IntegerType()),
+        StructField("dem", IntegerType()),
+        StructField("timezone", StringType()),
+        StructField("modification_date", StringType()),
+    ]
+)
 
 df = (
-    spark.read
-        .option("sep", "\t")
-        .schema(schema)
-        .csv("s3a://landing-bucket/geonames/cities1000.txt")
+    spark.read.option("sep", "\t")
+    .schema(schema)
+    .csv("s3a://landing-bucket/geonames/cities1000.txt")
 )
 ```
 
@@ -428,440 +748,600 @@ from pyspark.sql.functions import to_json, struct, col
 
 # Select only the required fields and convert to JSON
 kafka_df = df.select(
-    col("name").alias("key"),          # Kafka message key
-    to_json(
-        struct(
-            col("name"),
-            col("latitude"),
-            col("longitude")
-        )
-    ).alias("value")  # Kafka expects a column named 'value' for the message payload
+    col("name").alias("key"),  # Kafka message key
+    to_json(struct(col("name"), col("latitude"), col("longitude"))).alias(
+        "value"
+    ),  # Kafka expects a column named 'value' for the message payload
 )
 
 # Write to Kafka
-kafka_df.write \
-    .format("kafka") \
-    .option("kafka.bootstrap.servers", "kafka-1:19092") \
-    .option("topic", "pub.ref.geonames.state.v1") \
-    .save()
+kafka_df.write.format("kafka").option(
+    "kafka.bootstrap.servers", "kafka-1:19092"
+).option("topic", "pub.ref.geonames.state.v1").save()
 ```
 
 > **What just happened?** Spark read roughly 150,000 city records from the GeoNames file in RustFS and wrote each one as a JSON message to Kafka. The `priv.ref.geonames.state.v1` topic now acts as a reference lookup table that ksqlDB can join against in the geo enrichment step in section 06.
 
-## 06 - Fraud Detection on Credit Card Transaction Stream
+## 08 Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment
 
-**Goal:** Build a multi-stage streaming fraud detection pipeline in ksqlDB that progressively enriches and scores each transaction. By the end of this section, every transaction flowing through Kafka will carry a fraud flag and a reason code.
+**Goal:** Build a multi-stage streaming fraud detection pipeline in FlinkSQL that progressively enriches and scores each transaction. By the end of this section, every transaction flowing through Kafka will carry a fraud flag and a reason code.
 
-This section uses ksqlDB to build a streaming fraud detection pipeline on top of the raw transaction data. The pipeline progressively enriches and flags transactions:
+With all table definitions persisted in the Hive catalog, we can now build the two-stage pipeline. Make sure your SQL client session has the Hive catalog active:
 
-1. Create a stream over the raw transaction topic
-2. Join with a merchant blacklist table to flag known-bad merchants
-3. Enrich flagged transactions with merchant details (name, country, city, category)
-4. Further enrich with cardholder profile data to flag transactions exceeding the cardholder's personal average amount
-5. Add geo-coordinates to city names for downstream analytics
-
-Connect to the ksqlDB CLI to run the statements below:
-
-``` bash
-docker exec -it ksqldb-cli ksql http://ksqldb-server-1:8088
+```bash
+docker exec -it flink-sql-cli ./bin/sql-client.sh
 ```
-
-### Prepare KSQL Stream `pay_transaction_s` and perform a streaming query
-
-**Goal:** Map the raw Kafka topic to a typed ksqlDB stream so you can run SQL queries against it.
-
-Create a stream that reads from the raw transaction topic. Transactions are serialized with Avro and the schema is managed by Schema Registry.
-
-``` sql
-CREATE STREAM IF NOT EXISTS pay_transaction_s 
-  WITH (kafka_topic='priv.pay.transaction.delta.v1',
-        value_format='AVRO');
-```
-
-> **What just happened?** ksqlDB has created a logical stream on top of the Kafka topic. No data was moved — the stream is a live, continuously updated view of the topic. From this point forward you can query the stream using familiar SQL syntax.
-
-Run a push query to see transactions arriving in real time:
 
 ```sql
-SELECT * FROM pay_transaction_s EMIT CHANGES;
+USE CATALOG hive_catalog;
+USE fraud_detection;
 ```
 
-> **What you should see:** A continuous flow of transaction rows printed to the CLI. Each row represents one payment event. Press `Ctrl+C` to stop.
+### Flag transactions against the merchant state
 
-#### Perform a stateless streaming operation on `pay_transaction_s` (filter)
-
-You can add a `WHERE` clause to any push query to filter the stream in real time. The following query shows only transactions for three specific merchants:
+Register the merchant state lookup table. The `upsert-kafka` connector treats the topic as a compacted changelog — Flink maintains an in-memory map of the latest value per key, making it suitable for point-in-time lookups during stream-table joins:
 
 ```sql
-SELECT *
-FROM pay_transaction_s 
-WHERE merchant_id IN ('merchant-87', 'merchant-32', 'merchant-82')
-EMIT CHANGES;
+CREATE TABLE IF NOT EXISTS ref_merchant_t (
+    merchant_id   STRING,
+    name          STRING,
+    country       STRING,
+    city          STRING,
+    category_name STRING,
+    status        STRING,
+    PRIMARY KEY (merchant_id) NOT ENFORCED
+) WITH (
+    'connector'                    = 'upsert-kafka',
+    'topic'                        = 'pub.ref.merchant.state.v1',
+    'properties.bootstrap.servers' = 'kafka-1:19092',
+    'key.format'                   = 'raw',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schema-registry-1:8081'
+);
 ```
 
-#### Perform statefull streaming operations on `pay_transaction_s` (aggregations)
-
-ksqlDB can also maintain running aggregates over the stream. The following query counts transactions per card number, updating the count each time a new transaction arrives:
-
-```sql
-SELECT card_number, COUNT(*) AS nof 
-FROM pay_transaction_s
-GROUP BY card_number
-EMIT CHANGES;
-```
-
-Windowed aggregations let you summarize over fixed time intervals. The following query counts and sums transactions per card number within rolling 1-minute tumbling windows:
-
-```sql
-SELECT
-  TIMESTAMPTOSTRING(WINDOWSTART, 'yyyy-MM-dd HH:mm:ss', 'UTC') AS window_start,
-  TIMESTAMPTOSTRING(WINDOWEND, 'yyyy-MM-dd HH:mm:ss', 'UTC') AS window_end,
-  card_number,
-  COUNT(*) AS nof,
-  SUM(amount) AS sum
-FROM pay_transaction_s
-WINDOW TUMBLING (SIZE 1 MINUTE)
-GROUP BY card_number
-EMIT CHANGES;
-```
-
-To focus on cards with more than one transaction per minute — a potential velocity fraud signal — add a `HAVING` clause:
-
-```sql
-SELECT
-  TIMESTAMPTOSTRING(WINDOWSTART, 'yyyy-MM-dd HH:mm:ss', 'UTC') AS window_start,
-  TIMESTAMPTOSTRING(WINDOWEND, 'yyyy-MM-dd HH:mm:ss', 'UTC') AS window_end,
-  card_number,
-  COUNT(*) AS nof,
-  SUM(amount) AS sum
-FROM pay_transaction_s
-WINDOW TUMBLING (SIZE 1 MINUTE)
-GROUP BY card_number
-HAVING COUNT(*) > 1
-EMIT CHANGES;
-```
-
-### Prepare black list table and use it to flag problematic transactions
-
-**Goal:** Create a dynamic blacklist of merchants and join it against the transaction stream so that any transaction involving a blacklisted merchant is flagged in real time.
-
-The blacklist is a ksqlDB table backed by the compacted topic `priv.pay.blacklist.state.v1`. A table in ksqlDB represents the latest state per key, making it suitable for point-in-time lookups during stream-table joins.
-
-```sql
-CREATE TABLE IF NOT EXISTS pay_blacklist_t (key VARCHAR PRIMARY KEY, merchant_id VARCHAR)
-WITH (kafka_topic='priv.pay.blacklist.state.v1',
-        value_format='AVRO', key_format='AVRO');
-```
-
-Let's join the transaction stream with the blacklist table to see which transactions involve blacklisted merchants:
+Join the transaction stream with the merchant table to see which transactions involve blocked merchants:
 
 ```sql
 SELECT t.*
-	, CASE 
-			WHEN bl.key IS NOT NULL 
-			THEN 1 else 0 
-		END 					AS is_flagged
-	, CASE 
-			WHEN bl.key IS NOT NULL 
-			THEN 'blacklist' else ''
-		END 					AS flagged_reason		
-FROM pay_transaction_s		t
-LEFT JOIN pay_blacklist_t  bl
-ON (t.merchant_id = bl.key)
-EMIT CHANGES;
+     , CASE WHEN m.`status` = 'BLOCKED' THEN 1 ELSE 0 END           AS is_flagged
+     , CASE WHEN m.`status` = 'BLOCKED' THEN 'blocked' ELSE '' END AS flagged_reason
+FROM pay_transaction_t t
+LEFT JOIN ref_merchant_t m 
+  ON t.merchant_id = m.merchant_id;
 ```
 
-As the black list is currently empty, no transaction is flagged, which is of course ok!
+> **What you should see:** An output similar to the screenshot below — every transaction has `is_flagged=0` and an empty `flagged_reason` because none of the merchants in the merchant state topic are in status BLOCKED.
 
-In another terminal, insert two black-listed merchants into the black list table:
+![](./images/flink-sql-result-with-blacklist-empty.png)
 
-``` bash
-docker exec -it ksqldb-cli ksql http://ksqldb-server-1:8088
+Let's block some merchants so we can test our logic. We can do that by updating the source table in the Merchant legacy application. 
+
+To prove that updates in the database propagate to Kafka in real time, set the `status` of two merchants to `BLOCKED` via the PostgreSQL CLI:
+
+```bash
+docker exec -ti postgresql psql -U postgres -c "
+UPDATE merchant SET status = 'BLOCKED' WHERE merchant_id IN ('merchant-199', 'merchant-111');
+"
 ```
+
+Now watch the Kafka topic for the updated records. Leave the kcat consumer running in a second terminal and you should see two new messages arrive within seconds — one per updated merchant — with `"status": "BLOCKED"`:
+
+```bash
+docker exec -ti kcat kcat -b kafka-1:19092 -t pub.ref.merchant.state.v1 -r http://schema-registry-1:8081 -s key=s -s value=avro -f '%k: %s\n' -q
+```
+
+> **What just happened?** Debezium detected the two `UPDATE` statements in the PostgreSQL WAL and emitted a change event for each row. Each Kafka message carries only the current row — with `status` now set to `BLOCKED`. Because the topic is compacted, the new records for `merchant-199` and `merchant-111` replace the previous ones, so any consumer doing a table-scan or stream-table join will see the updated status immediately.
+
+> **What you should see:** Transactions from `merchant-199` and `merchant-111` now appear with `is_flagged=1` and `flagged_reason='blacklist'` in the first terminal window:
+
+![](./images/flink-sql-result-with-blacklist.png)
+
+Stop the ad-hoc query (**Ctrl-C**) and let's extend the SELECT list to also enrich with the data from the merchant table.
 
 ```sql
-INSERT INTO pay_blacklist_t (key, merchant_id)
-VALUES ('merchant-199', 'merchant-199');
-
-INSERT INTO pay_blacklist_t (key, merchant_id)
-VALUES ('merchant-10', 'merchant-10');
-```
-
-> **What just happened?** Inserting these rows into `pay_blacklist_t` publishes messages to the `priv.pay.blacklist.state.v1` topic. ksqlDB immediately picks up the new entries and the running join query in the first terminal will now start emitting rows with `is_flagged = 1` for any transaction where `merchant_id` matches `merchant-199` or `merchant-10`.
-
-You should now start to see some flagged transactions in the other window. As it is a bit hard to spot among the many non-problematic transactions, let's just select the ones where the flag is not `0`.
-
-Stop the query.
-
-Now that the blacklist join works interactively, materialize it into a persistent Kafka-backed stream so that other consumers can subscribe to flagged transactions downstream:
-
-```
-DROP STREAM IF EXISTS pay_transaction_flagged_enriched_s;
-DROP STREAM IF EXISTS pay_transaction_flagged_s;
-
-CREATE STREAM pay_transaction_flagged_s
-  WITH (kafka_topic='priv.pay.transaction-flagged.delta.v1',
-        value_format='AVRO', key_format='AVRO', partitions=2)
-AS
-	SELECT t.transaction_id
-	, t.card_number
-	, t.currency
-	, t.amount
-	, t.merchant_id        AS merchant_id
-	, t.channel
-	, t.transaction_date
-	, CASE 
-			WHEN bl.key IS NOT NULL 
-			THEN 1 else 0 
-		END 					AS is_flagged
-	, CASE 
-			WHEN bl.key IS NOT NULL 
-			THEN 'blacklist' else ''
-		END 					AS flagged_reason
-	FROM pay_transaction_s		t
-	LEFT JOIN pay_blacklist_t  bl
-		ON (t.merchant_id = bl.key)
-	EMIT CHANGES; 
-```
-
-> **What just happened?** ksqlDB created the stream `pay_transaction_flagged_s` and started a persistent query in the background. Every incoming transaction from `pay_transaction_s` is now joined against the blacklist and the result (with `is_flagged` and `flagged_reason`) is written to the new topic `priv.pay.transaction-flagged.delta.v1`. This topic serves as the input to the next enrichment stage.
-
-Now let's only view the flagged transactions:
-
-```sql
-SELECT * 
-FROM pay_transaction_flagged_s 
-WHERE is_flagged = 1 
-EMIT CHANGES;
-```
-
-> **What you should see:** Only rows where `is_flagged = 1` and `flagged_reason = 'blacklist'`. If you see no results, the blacklist merchants (`merchant-199`, `merchant-10`) may not have appeared in the synthetic data yet. You can add more merchants to the blacklist using additional `INSERT INTO pay_blacklist_t` statements.
-
-if you think it takes to long, you can of course add other merchants to the blacklist. 
-
-### Prepare table `ref_merchant_t` and join it to transactions
-
-**Goal:** Enrich each flagged transaction with human-readable merchant details so that downstream analytics can identify not just the fraud flag but also where and in what category the suspicious transaction occurred.
-
-Enriching transactions with merchant details (name, city, country, category) enables downstream analytics to understand where fraud is occurring. The merchant table is backed by the compacted `pub.ref.merchant.state.v1` topic populated by ShadowTraffic.
-
-```sql
-CREATE TABLE IF NOT EXISTS ref_merchant_t (key STRING PRIMARY KEY)
-  WITH (kafka_topic='pub.ref.merchant.state.v1',
-        value_format='AVRO', key_format='AVRO');
-```
-
-Preview the join interactively before materializing it:
-
-```sql
-SELECT t.*
-		, m.name 				AS merchant_name
-		, m.country
-		, m.city
-		, m.category_name
-FROM pay_transaction_flagged_s		t
+SELECT t.transaction_id
+     , t.card_number
+     , t.currency
+     , t.amount
+     , t.merchant_id
+     , t.channel
+     , t.transaction_date
+     , CASE WHEN m.`status` = 'BLOCKED' THEN 1 ELSE 0 END           AS is_flagged
+     , CASE WHEN m.`status` = 'BLOCKED' THEN 'blocked' ELSE '' END AS flagged_reason
+     , m.name             AS merchant_name
+     , m.country
+     , m.city
+     , m.category_name
+FROM pay_transaction_t t
 LEFT JOIN ref_merchant_t m
-	ON (t.merchant_id = m.key)
-EMIT CHANGES; 
+  ON t.merchant_id = m.merchant_id;
 ```
 
-> **What you should see:** Transaction rows now include `merchant_name`, `country`, `city`, and `category_name` alongside the flag fields. Rows where the merchant is not found in the reference table will have `null` for the merchant fields — this can happen for new merchants that haven't been loaded yet.
+Stop the ad-hoc query (**Ctrl-C**) and materialize the join as a persistent Flink job. 
 
-Now materialize the enriched result into a persistent stream:
+Before registering the sink table, we have to create the backing topic by adding it to the Jikkou spec and apply it. The topic uses `compact` cleanup because `upsert-kafka` writes keyed records and the log must retain the latest value per key:
+
+```yaml
+# append to $DATAPLATFORM_HOME/scripts/jikkou/card-topic-specs.yml
+  - metadata:
+      name: 'priv.pay.transaction-flagged.delta.v1'
+    spec:
+      partitions: 2
+      replicas: 3
+      configs:
+        cleanup.policy: compact
+        segment.ms: 100
+        delete.retention.ms: 100
+        min.cleanable.dirty.ratio: 0.001
+```
+
+and apply it:
+
+```bash
+docker compose run --rm jikkou apply --files=/jikkou/card-topic-specs.yml
+```
+
+and check that the topic is in fact created:
+
+```bash
+docker exec -ti kcat kcat -b kafka-1:19092 -L | grep "priv\.\|pub\."
+```
+
+Now create the sink table:
 
 ```sql
-DROP STREAM IF EXISTS pay_transaction_flagged_enriched_s;
-
-CREATE STREAM pay_transaction_flagged_enriched_s
-  WITH (kafka_topic='priv.pay.transaction-flagged-enriched.delta.v1',
-        value_format='AVRO', key_format='AVRO', partitions=2)
-AS
-	SELECT t.transaction_id
-		, t.card_number
-		, t.currency
-		, t.amount
-		, t.channel
-		, t.transaction_date
-		, t.is_flagged
-		, t.flagged_reason
-		, t.merchant_id		AS merchant_id
-		, m.name 				AS merchant_name
-		, m.country
-		, m.city
-		, m.category_name
-	FROM pay_transaction_flagged_s		t
-	LEFT JOIN ref_merchant_t m
-		ON (t.merchant_id = m.key)
-	EMIT CHANGES; 
+CREATE TABLE IF NOT EXISTS pay_transaction_flagged_t (
+    transaction_id   STRING,
+    card_number      STRING,
+    currency         STRING,
+    amount           DOUBLE,
+    merchant_id      STRING,
+    channel          STRING,
+    transaction_date TIMESTAMP(3),
+    is_flagged       INT,
+    flagged_reason   STRING,
+    merchant_name    STRING,
+    country          STRING,
+    city             STRING,
+    category_name    STRING,
+    PRIMARY KEY (transaction_id) NOT ENFORCED
+) WITH (
+    'connector'                    = 'upsert-kafka',
+    'topic'                        = 'priv.pay.transaction-flagged.delta.v1',
+    'properties.bootstrap.servers' = 'kafka-1:19092',
+    'key.format'                   = 'avro-confluent',
+    'key.avro-confluent.url'       = 'http://schema-registry-1:8081',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schema-registry-1:8081'
+);
 ```
 
-Verify all enriched transactions are flowing:
+and then start the continuous insert:
 
 ```sql
-SELECT * 
-FROM pay_transaction_flagged_enriched_s
-EMIT CHANGES;
+INSERT INTO pay_transaction_flagged_t
+SELECT t.transaction_id
+     , t.card_number
+     , t.currency
+     , t.amount
+     , t.merchant_id
+     , t.channel
+     , t.transaction_date
+     , CASE WHEN m.`status` = 'BLOCKED' THEN 1 ELSE 0 END           AS is_flagged
+     , CASE WHEN m.`status` = 'BLOCKED' THEN 'blocked' ELSE '' END AS flagged_reason
+     , m.name             AS merchant_name
+     , m.country
+     , m.city
+     , m.category_name
+FROM pay_transaction_t t
+LEFT JOIN ref_merchant_t m
+  ON t.merchant_id = m.merchant_id;
 ```
 
-Filter to only flagged transactions to confirm the enrichment is working end to end:
+Verify flagged transactions are flowing:
 
 ```sql
-SELECT * 
-FROM pay_transaction_flagged_enriched_s
-WHERE is_flagged = 1 
-EMIT CHANGES;
+SELECT * FROM pay_transaction_flagged_t WHERE is_flagged = 1;
 ```
 
-### Unusually large transactions (optional, if `pub.cus.cardHolder.state.v1` topic available)
+> **What just happened?** Flink submitted a persistent streaming job that runs on the cluster independently of the SQL client session. Every new record on `priv.pay.transaction.delta.v1` is joined against the current blacklist state and the result is written to `priv.pay.transaction-flagged.delta.v1`. Because `pay_blacklist_t` uses the upsert-kafka connector, Flink maintains an in-memory state of the latest value per merchant key — adding a merchant to the blacklist after the job starts immediately affects subsequent transactions.
 
-**Goal:** Add a second fraud signal — personalised high-amount detection — by comparing each transaction against the cardholder's own historical average transaction amount.
+## 09 Fraud Detection - Enrich with CardHolder Data
 
-This step adds personalized fraud scoring: instead of a fixed threshold, each transaction is compared against the cardholder's own `avg_transaction_amount`. This requires the cardholder data to be flowing (see section 07). Ensure that the `pub.cus.cardHolder.state.v1` topic is populated (via the outbox connector registered in section 02) before proceeding.
+The blocked merchants join flags known-bad merchants. 
 
-First we re-partition the cardholder stream by card number so it can be joined with the transaction stream:
+A complementary signal is **personalized amount scoring**: instead of a fixed dollar threshold, compare each transaction against that specific cardholder's own average spend. A transaction that is large relative to that card's own history is suspicious — regardless of the absolute amount. This requires joining the enriched flagged stream with cardholder data.
 
-```sql
-	SELECT t.transaction_id
-		, t.card_number
-		, t.currency
-		, t.amount
-		, t.channel
-		, t.transaction_date
-		, CASE WHEN (t.amount > 200) 
-				THEN t.is_flagged + 1 
-				ELSE t.is_flagged 
-		  END AS is_flagged
-		, CASE WHEN (t.amount > 200) 
-				THEN CONCAT(t.flagged_reason, ',', 'high-amount')
-				ELSE t.flagged_reason
-		  END AS flagged_reason
-		, t.merchant_id		AS merchant_id
-		, t.merchant_name
-		, t.country
-		, t.city
-		, t.category_name
-	FROM pay_transaction_flagged_enriched_s  t
-	PARTITION BY t.card_number
-	EMIT CHANGES; 
+### Register the cardholder lookup table
+
+Each record carries the full cardholder profile — including `avg_transaction_amount`, which represents the card's historical average spend. The Avro value uses a nested `card_holder` record; Flink SQL maps this to a `ROW` type accessed with dot notation.
+
+```bash
+docker exec -ti flink-sql-cli ./bin/sql-client.sh
+
+use catalog hive_catalog;
+use fraud_detection;
 ```
 
 ```sql
-CREATE STREAM IF NOT EXISTS cus_cardholder_s
-WITH (kafka_topic='pub.cus.cardHolder.state.v1',
-        value_format='AVRO');
+DROP TABLE IF EXISTS cus_cardholder_t;
+
+CREATE TABLE cus_cardholder_t (
+    id           STRING,
+    card_holder  ROW<
+        id                      STRING,
+        first_name              STRING,
+        last_name               STRING,
+        email_address           STRING,
+        phone_number            STRING,
+        preferred_contact       STRING,
+        segment                 STRING,
+        cards                   ARRAY<ROW<
+            number       STRING,
+            type         STRING,
+            expiry_date  STRING
+        >>,
+        avg_transaction_amount  DOUBLE,
+        addresses               ARRAY<ROW<
+            street    STRING,
+            zip_code  STRING,
+            city      STRING,
+            state     STRING
+        >>,
+        usual_countries         ARRAY<STRING>,
+        onboarded_date          TIMESTAMP(3)
+    >,
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'connector'                    = 'upsert-kafka',
+    'topic'                        = 'pub.cus.cardHolder.state.v1',
+    'properties.bootstrap.servers' = 'kafka-1:19092',
+    'key.format'                   = 'raw',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schema-registry-1:8081',
+    'value.fields-include'         = 'EXCEPT_KEY'
+);
 ```
 
+> **What just happened?** Flink registered the cardholder topic as an upsert-kafka table. The `id` column (top-level primary key) maps to the Kafka message key; the nested `card_holder` ROW maps to the Avro value. `value.fields-include = 'EXCEPT_KEY'` tells Flink not to include `id` in the Avro value reader schema, matching the actual `CardHolderState` schema in the Schema Registry. Flink maintains in-memory state of the latest cardholder record per `id`, ready for stream-table joins.
+
+We can validate it by executing the following query
 
 ```sql
-CREATE STREAM IF NOT EXISTS cus_cardholder_by_card_number_s
-AS
-SELECT * FROM cus_cardholder_s c
-PARTITION BY c.card_holder->card->number
-EMIT CHANGES; 
+SELECT ch.id
+, ch.card_holder.first_name                AS first_name
+, ch.card_holder.last_name                 AS last_name
+, ch.card_holder.cards[1].number           AS card_number
+, ch.card_holder.cards[1].type             AS card_type
+, ch.card_holder.cards[1].expiry_date      AS card_exp_date
+FROM cus_cardholder_t ch;
 ```
+
+To get one row per card with all cardholder details repeated, use `CROSS JOIN UNNEST` to explode the `cards` array:
 
 ```sql
-CREATE TABLE IF NOT EXISTS cus_cardholder_t (key VARCHAR PRIMARY KEY)
-WITH (kafka_topic='CUS_CARDHOLDER_BY_CARD_NUMBER_S',
-        value_format='AVRO');
+SELECT ch.id
+, ch.card_holder.first_name           AS first_name
+, ch.card_holder.last_name            AS last_name
+, ch.card_holder.segment              AS segment
+, ch.card_holder.avg_transaction_amount AS avg_transaction_amount
+, c.number                            AS card_number
+, c.type                              AS card_type
+, c.expiry_date                       AS card_exp_date
+FROM cus_cardholder_t ch
+CROSS JOIN UNNEST(ch.card_holder.cards) AS c;
 ```
 
-> **What just happened?** ksqlDB stream-table joins require both sides to be co-partitioned by the join key. The original cardholder topic is partitioned by cardholder ID, but the transactions use `card_number` as the join key. By creating `cus_cardholder_by_card_number_s` (repartitioned by card number) and then creating `cus_cardholder_t` on top of it, the two streams are now aligned and can be joined correctly.
+> **What just happened?** `UNNEST` flattens the `cards` array so that each element becomes its own row. `CROSS JOIN` pairs each flattened card row with the parent cardholder fields. A cardholder with three cards produces three rows, all sharing the same `id`, `first_name`, `last_name`, and other scalar fields.
 
-Now create the persistent enriched stream that uses the cardholder's personal average to detect unusually large transactions:
+
+Now let's use that unnested view to join with the flagged transactions. By joining on the unnested `c.number`, each transaction is matched to the specific card — and through that card, to the cardholder's personal average:
 
 ```sql
-CREATE STREAM pay_transaction_flagged2_enriched_s
-  WITH (kafka_topic='priv.pay.transaction-flagged2-enriched.delta.v1',
-        value_format='AVRO', key_format='AVRO', partitions=2)
-AS
-	SELECT t.transaction_id
-		, t.card_number
-		, t.currency
-		, t.amount
-		, t.channel
-		, t.transaction_date
-		, CASE WHEN (t.amount > card_holder->avg_transaction_amount) 
-				THEN t.is_flagged + 1 
-				ELSE t.is_flagged 
-		  END AS is_flagged
-		, CASE WHEN (t.amount > card_holder->avg_transaction_amount) 
-				THEN CONCAT(t.flagged_reason
-								, CASE WHEN t.flagged_reason IS NOT NULL and t.flagged_reason != '' THEN ',' ELSE '' END
-								, 'high-amount')
-				ELSE t.flagged_reason
-		  END AS flagged_reason
-		, t.merchant_id		AS merchant_id
-		, t.merchant_name
-		, t.country
-		, t.city
-		, t.category_name
-		, c.card_holder->avg_transaction_amount
-	FROM pay_transaction_flagged_enriched_s  t
-	LEFT JOIN cus_cardholder_t c
-		ON (t.card_number = c.key)
-	PARTITION BY t.card_number
-	EMIT CHANGES; 
+SELECT
+    t.transaction_id
+  , t.card_number
+  , t.amount
+  , t.is_flagged
+  , t.flagged_reason
+  , ch.card_holder.first_name
+  , ch.card_holder.last_name
+  , ch.card_holder.avg_transaction_amount
+  , CASE WHEN t.amount > ch.card_holder.avg_transaction_amount THEN 1 ELSE 0 END AS above_avg
+FROM pay_transaction_flagged_t t
+JOIN (      // should be LEFT JOIN
+    SELECT ch.id
+         , ch.card_holder
+         , c.number AS card_number
+    FROM cus_cardholder_t ch
+    CROSS JOIN UNNEST(ch.card_holder.cards) AS c
+) ch ON t.card_number = ch.card_number;
 ```
 
-Query the result to see transactions flagged for exceeding the cardholder's personal average:
+> **What just happened?** The subquery unnests the `cards` array so that each row carries both the cardholder fields and a single `card_number`. The outer join then matches each transaction's `card_number` to the correct cardholder via the unnested card — without this step, the join would have no flat key to match on.
+
+### Materialize as a persistent job
+
+As before, we have to first create the new topic. Add the following definition to the Jikkou spec file:
+
+```yaml
+# append to $DATAPLATFORM_HOME/scripts/jikkou/card-topic-specs.yml
+  - metadata:
+      name: 'priv.pay.transaction-flagged2.delta.v1'
+    spec:
+      partitions: 2
+      replicas: 3
+      configs:
+        cleanup.policy: compact
+        segment.ms: 100
+        delete.retention.ms: 100
+        min.cleanable.dirty.ratio: 0.001
+```
+
+and apply it against the Kafka cluster:
+
+```bash
+cd $DATAPLATFORM_HOME
+docker compose run --rm jikkou apply --files=/jikkou/card-topic-specs.yml
+```
+
+> **What you should see:** Jikkou output confirming one new topic was created: `priv.pay.transaction-flagged2-enriched.delta.v1`.
+
+Register the sink table: 
 
 ```sql
-SELECT * FROM pay_transaction_flagged2_enriched_s
-WHERE is_flagged > 0
-EMIT CHANGES;
+CREATE TABLE IF NOT EXISTS pay_transaction_flagged2_t (
+    transaction_id         STRING,
+    card_number            STRING,
+    currency               STRING,
+    amount                 DOUBLE,
+    channel                STRING,
+    transaction_date       TIMESTAMP(3),
+    merchant_id            STRING,
+    merchant_name          STRING,
+    country                STRING,
+    city                   STRING,
+    category_name          STRING,
+    card_holder_first_name STRING,
+    card_holder_last_name  STRING,
+    card_holder_avg_amount DOUBLE,
+    is_flagged             INT,
+    flagged_reason         STRING,    
+    PRIMARY KEY (transaction_id) NOT ENFORCED
+) WITH (
+    'connector'                    = 'upsert-kafka',
+    'topic'                        = 'priv.pay.transaction-flagged2.delta.v1',
+    'properties.bootstrap.servers' = 'kafka-1:19092',
+    'key.format'                   = 'raw',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schema-registry-1:8081'
+);
 ```
 
-> **What you should see:** Rows where `is_flagged` is `1` (blacklist only), `2` (blacklist + high amount), or `1` (high amount only). The `flagged_reason` column will contain a comma-separated list of reasons such as `blacklist,high-amount`.
-
-### Geo Enrichment (opitonal, if `pub.ref.geonames.state.v1` topic available)
-
-**Goal:** Add latitude and longitude coordinates to the enriched transaction stream so that downstream analytics tools can plot transactions on a map.
-
-City names in the transaction data are matched against the GeoNames dataset (loaded in section 10) to attach latitude/longitude coordinates. Because ksqlDB stream-table joins require co-partitioning, we first re-partition the enriched transaction stream by `city` before joining. This step requires that section 05 (GeoNames data load) has been completed successfully.
+And start the continuous insert. The `is_flagged` counter is incremented and `flagged_reason` is appended when the amount exceeds the cardholder's average:
 
 ```sql
-CREATE TABLE IF NOT EXISTS ref_geonames_t (key VARCHAR PRIMARY KEY, name VARCHAR, latitude DOUBLE, longitude DOUBLE)
-WITH (kafka_topic='priv.ref.geonames.state.v1',
-        value_format='JSON');
-```
+INSERT INTO pay_transaction_flagged2_t
+SELECT
+    t.transaction_id
+  , t.card_number
+  , t.currency
+  , t.amount
+  , t.channel
+  , t.transaction_date
+  , t.merchant_id
+  , t.merchant_name
+  , t.country
+  , t.city
+  , t.category_name
+  , ch.card_holder.first_name               AS card_holder_first_name
+  , ch.card_holder.last_name                AS card_holder_last_name
+  , ch.card_holder.avg_transaction_amount   AS card_holder_avg_amount
+   , CASE WHEN ch.card_number IS NOT NULL
+          AND t.amount > ch.card_holder.avg_transaction_amount
+         THEN t.is_flagged + 1
+         ELSE t.is_flagged
+    END AS is_flagged
+  , CASE WHEN ch.card_number IS NOT NULL
+          AND t.amount > ch.card_holder.avg_transaction_amount
+         THEN CONCAT(t.flagged_reason, CASE WHEN t.flagged_reason <> '' THEN ',' ELSE '' END, 'high-amount')
+         ELSE t.flagged_reason
+    END AS flagged_reason
+FROM pay_transaction_flagged_t t
+JOIN (      // should be LEFT JOIN
+    SELECT ch.id
+         , ch.card_holder
+         , c.number AS card_number
+    FROM cus_cardholder_t ch
+    CROSS JOIN UNNEST(ch.card_holder.cards) AS c
+) ch ON t.card_number = ch.card_number;
+````
 
-Test the join interactively before persisting it:
+Query transactions flagged for high amount relative to the cardholder's own average:
 
 ```sql
-SELECT *
-FROM pay_transaction_flagged_enriched_s t
-LEFT JOIN ref_geonames_t g
-  ON t.city = g.key
-EMIT CHANGES;
+SELECT transaction_id, card_number, amount, card_holder_avg_amount, flagged_reason
+FROM pay_transaction_flagged2_t
+WHERE flagged_reason LIKE '%high-amount%';
 ```
 
-> **What you should see:** Transaction rows now include `latitude` and `longitude` fields for each city. Cities that are not found in the GeoNames dataset will have `null` coordinates.
+> **What just happened?** Flink joins each incoming enriched transaction against the latest cardholder record (maintained in upsert-kafka state). When a transaction's amount exceeds that card's `avg_transaction_amount`, the `is_flagged` counter is incremented and `'high-amount'` is appended to `flagged_reason` — which may already contain `'blacklist'` from the previous stage, producing composite flags like `'blacklist,high-amount'`.
 
-Because the GeoNames table has a single partition, re-partition the transaction stream to a single partition as well, using `city` as the new key:
+Of course we can also just query all the flagged transactions
 
 ```sql
-DROP STREAM pay_transaction_flagged_enriched_s_p1;
-
-CREATE STREAM pay_transaction_flagged_enriched_s_p1
-WITH (kafka_topic='priv.pay.transaction_flagged_enriched_part1.state.v1', partitions=1) AS
-SELECT *
-FROM pay_transaction_flagged_enriched_s
-PARTITION BY city
-EMIT CHANGES;
+SELECT transaction_id, card_number, amount, flagged_reason
+FROM pay_transaction_flagged2_t
+WHERE is_flagged > 0;
 ```
 
-Now join the repartitioned stream against the GeoNames table:
+## 10 Fraud Detection - Advanced Fraud Detection Patterns
+
+This section adds a complementary fraud signal that does not require an external reference list — it derives suspicion entirely from patterns within the transaction stream itself using `MATCH_RECOGNIZE`.
+
+### Card-testing sequence (`MATCH_RECOGNIZE`)
+
+**Signal:** A common attack pattern is to first make a tiny "probe" transaction (under $5) to verify a stolen card is still active, then immediately follow up with a large purchase (over $200) on the same card. The two events are consecutive on the same card and happen within minutes of each other.
+
+**Why this requires previous records:** `MATCH_RECOGNIZE` scans an ordered sequence of rows partitioned by card number, looking for a specific pattern across consecutive events. Flink buffers all unmatched rows for each card in state until the pattern either completes or the match window expires.
+
+This is an ad-hoc exploratory query — run it in the SQL Client to watch matches appear in real time:
 
 ```sql
-SELECT *
-FROM pay_transaction_flagged_enriched_s_p1 t
-LEFT JOIN ref_geonames_t g
-  ON t.city = g.key
-EMIT CHANGES;
+SELECT
+    card_number,
+    test_tx_id,
+    ROUND(test_amount, 2)  AS test_amount,
+    large_tx_id,
+    ROUND(large_amount, 2) AS large_amount,
+    test_time,
+    large_time,
+    TIMESTAMPDIFF(SECOND, test_time, large_time) AS seconds_between
+FROM pay_transaction_t
+MATCH_RECOGNIZE (
+    PARTITION BY card_number
+    ORDER BY transaction_date
+    MEASURES
+        TEST.transaction_id    AS test_tx_id,
+        TEST.amount            AS test_amount,
+        BIG.transaction_id     AS large_tx_id,
+        BIG.amount             AS large_amount,
+        TEST.transaction_date  AS test_time,
+        BIG.transaction_date   AS large_time
+    ONE ROW PER MATCH
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (TEST BIG)
+    WITHIN INTERVAL '5' MINUTE
+    DEFINE
+        TEST AS amount < 5.0,
+        BIG  AS amount > 200.0
+) AS M;
 ```
 
-## 07 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect
+> **What you should see:** Whenever ShadowTraffic happens to generate a low-amount transaction immediately followed by a high-amount transaction for the same card within 5 simulated minutes, a match row appears. Because the amount distribution is skewed (5 % of transactions are high-value outliers), matches will occur occasionally but not constantly.
+
+You can tighten or relax the pattern by adjusting the thresholds in `DEFINE` or the `WITHIN` interval. You can also extend the pattern — for example `(TEST+ BIG)` would match one or more probe transactions before the large one.
+
+### Enrich the flagged transaction stream with the card-testing signal
+
+To propagate the card-testing flag into the unified enriched stream, add a third enrichment stage. `MATCH_RECOGNIZE` with `ONE ROW PER MATCH` emits one row per completed match. `MEASURES BIG.transaction_id` extracts the ID of the large follow-up transaction — which is the one that gets flagged. That matched ID is then joined against `pay_transaction_flagged2_enriched_t` to retrieve the full enriched record and write it back with `'card-testing'` appended to `flagged_reason`.
+
+First add the new topic to the Jikkou spec and apply it:
+
+```yaml
+# append to card-topic-specs.yml
+  - metadata:
+      name: 'priv.pay.transaction-flagged3.delta.v1'
+    spec:
+      partitions: 2
+      replicas: 3
+      configs:
+        cleanup.policy: compact
+        segment.ms: 100
+        delete.retention.ms: 100
+        min.cleanable.dirty.ratio: 0.001
+```
+
+```bash
+cd $DATAPLATFORM_HOME
+docker compose run --rm jikkou apply --files=/jikkou/card-topic-specs.yml
+```
+
+Register the sink table:
+
+```sql
+CREATE TABLE IF NOT EXISTS pay_transaction_flagged3_t (
+    transaction_id         STRING,
+    card_number            STRING,
+    currency               STRING,
+    amount                 DOUBLE,
+    channel                STRING,
+    transaction_date       TIMESTAMP(3),
+    is_flagged             INT,
+    flagged_reason         STRING,
+    merchant_id            STRING,
+    merchant_name          STRING,
+    country                STRING,
+    city                   STRING,
+    category_name          STRING,
+    card_holder_avg_amount DOUBLE,
+    PRIMARY KEY (transaction_id) NOT ENFORCED
+) WITH (
+    'connector'                    = 'upsert-kafka',
+    'topic'                        = 'priv.pay.transaction-flagged3.delta.v1',
+    'properties.bootstrap.servers' = 'kafka-1:19092',
+    'key.format'                   = 'raw',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schema-registry-1:8081'
+);
+```
+
+Start the persistent enrichment job:
+
+```sql
+INSERT INTO pay_transaction_flagged3_t
+SELECT
+    f.transaction_id,
+    f.card_number,
+    f.currency,
+    f.amount,
+    f.channel,
+    f.transaction_date,
+    f.is_flagged + 1 AS is_flagged,
+    CASE WHEN f.flagged_reason <> ''
+         THEN CONCAT(f.flagged_reason, ',card-testing')
+         ELSE 'card-testing'
+    END AS flagged_reason,
+    f.merchant_id,
+    f.merchant_name,
+    f.country,
+    f.city,
+    f.category_name,
+    f.card_holder_avg_amount
+FROM pay_transaction_t
+MATCH_RECOGNIZE (
+    PARTITION BY card_number
+    ORDER BY transaction_date
+    MEASURES
+        BIG.transaction_id     AS large_tx_id,
+        BIG.amount             AS large_amount
+    ONE ROW PER MATCH
+    AFTER MATCH SKIP TO NEXT ROW
+    PATTERN (TEST BIG)
+    WITHIN INTERVAL '5' MINUTE
+    DEFINE
+        TEST AS amount < 5.0,
+        BIG  AS amount > 200.0
+) AS m
+INNER JOIN pay_transaction_flagged2_t f
+    ON f.transaction_id = m.large_tx_id;
+```
+
+Query the card-testing flagged transactions as they arrive:
+
+```sql
+SELECT transaction_id, card_number, amount, is_flagged, flagged_reason
+FROM pay_transaction_flagged3_t
+WHERE flagged_reason LIKE '%card-testing%';
+```
+
+> **What just happened?** When `MATCH_RECOGNIZE` detects a completed TEST→BIG pattern, it emits one row containing `BIG.transaction_id` as `large_tx_id`. That ID is joined against `pay_transaction_flagged2_enriched_t` to retrieve the full enriched record for the large transaction. The `is_flagged` counter is incremented and `'card-testing'` is appended to `flagged_reason` — which may already contain `'blacklist'` or `'high-amount'` from earlier stages, producing composite flags like `'high-amount,card-testing'`. Only the large follow-up transaction is flagged; the small probe is left as-is.
+
+> **`MATCH_RECOGNIZE` vs `OVER` window:** `OVER` aggregates a metric over a time range and emits one output per input row. `MATCH_RECOGNIZE` looks for a specific multi-row sequence of event types and emits one output per completed match. Use `OVER` when you want a continuously updated statistic; use `MATCH_RECOGNIZE` when you want to detect a specific temporal narrative.
+
+
+To see all transactions that carry at least one fraud signal — from any stage:
+
+```sql
+SELECT transaction_id, card_number, amount, is_flagged, flagged_reason
+FROM pay_transaction_flagged3_t
+WHERE is_flagged > 0;
+```
+
+> **What you should see:** Transactions flagged with one or more reasons: `'blacklist'` (merchant on the blacklist), `'high-amount'` (amount exceeded cardholder's personal average), `'card-testing'` (large transaction preceded by a small probe on the same card), or any combination such as `'blacklist,high-amount'`.
+
+## 11 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect
 
 **Goal:** Persistently land all streaming data — raw transactions, flagged transactions, merchant reference data, and cardholder events — into durable Iceberg tables on object storage. This makes the data available for batch analytics with Spark and Trino even after the Kafka topic retention window has passed.
 
@@ -1169,7 +1649,7 @@ curl -X PUT \
 	}'
 ```
 
-## 08 - Validate the ingest by querying the Iceberg table using Spark SQL
+## 12 - Validate the ingest by querying the Iceberg table using Spark SQL
 
 **Goal:** Confirm that the Kafka Connect Iceberg sink connectors registered in section 07 are working correctly by querying the Iceberg tables and verifying that data has arrived.
 
@@ -1194,47 +1674,57 @@ or using jupyter (navigate to <http://dataplatform:28888> to open Jupyter) and c
 
 ```python
 import os
+
 # get the accessKey and secretKey from Environment
-accessKey = os.environ['AWS_ACCESS_KEY_ID']
-secretKey = os.environ['AWS_SECRET_ACCESS_KEY']
+accessKey = os.environ["AWS_ACCESS_KEY_ID"]
+secretKey = os.environ["AWS_SECRET_ACCESS_KEY"]
 
 from pyspark.sql import SparkSession
+
 spark = (
-    SparkSession.builder
-        .appName("Jupyter")
-        .master("spark://spark-master:7077")
-
-        .config("spark.jars.packages",
-                "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
-                "org.apache.iceberg:iceberg-aws-bundle:1.10.1")
-
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.access.key", accessKey)
-        .config("spark.hadoop.fs.s3a.secret.key", secretKey)
-        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
-
-        # ==== Iceberg catalog (Hive Metastore Iceberg REST Catalog) ===
-        .config("spark.sql.catalog.hive_iceberg_rest", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.hive_iceberg_rest.type", "rest")
-        .config("spark.sql.catalog.hive_iceberg_rest.uri", "http://hive-metastore:9084/iceberg")
-        .config("spark.sql.catalog.hive_iceberg_rest.warehouse", "s3a://admin-bucket/iceberg/warehouse")
-        .config("spark.sql.catalog.hive_iceberg_rest.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.endpoint", "http://rustfs-1:9000")
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.access-key-id", accessKey)
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.secret-access-key", secretKey)
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.path-style-access", "true")
-    
-        # use "hive_iceberg" as the default catalog
-        .config("spark.sql.defaultCatalog", "hive_iceberg_rest")
-
-        .config(
-            "spark.sql.extensions",
-            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
-        )
-
-        .getOrCreate()
+    SparkSession.builder.appName("Jupyter")
+    .master("spark://spark-master:7077")
+    .config(
+        "spark.jars.packages",
+        "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
+        "org.apache.iceberg:iceberg-aws-bundle:1.10.1",
+    )
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+    .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
+    .config("spark.hadoop.fs.s3a.path.style.access", "true")
+    .config("spark.hadoop.fs.s3a.access.key", accessKey)
+    .config("spark.hadoop.fs.s3a.secret.key", secretKey)
+    .config(
+        "spark.hadoop.fs.s3a.aws.credentials.provider",
+        "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+    )
+    # ==== Iceberg catalog (Hive Metastore Iceberg REST Catalog) ===
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest", "org.apache.iceberg.spark.SparkCatalog"
+    )
+    .config("spark.sql.catalog.hive_iceberg_rest.type", "rest")
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.uri", "http://hive-metastore:9084/iceberg"
+    )
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.warehouse",
+        "s3a://admin-bucket/iceberg/warehouse",
+    )
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.io-impl",
+        "org.apache.iceberg.aws.s3.S3FileIO",
+    )
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.endpoint", "http://rustfs-1:9000")
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.access-key-id", accessKey)
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.secret-access-key", secretKey)
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.path-style-access", "true")
+    # use "hive_iceberg" as the default catalog
+    .config("spark.sql.defaultCatalog", "hive_iceberg_rest")
+    .config(
+        "spark.sql.extensions",
+        "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+    )
+    .getOrCreate()
 )
 ```
 
@@ -1270,7 +1760,7 @@ SELECT * FROM payment_db.raw_transaction_flagged_t;
 
 > **What you should see:** Rows in both tables. The `raw_transaction_flagged_t` table should include `is_flagged` and `flagged_reason` columns. Rows with `is_flagged = 1` confirm that the end-to-end pipeline — from ShadowTraffic through Kafka, ksqlDB, and Kafka Connect — is working.
 
-## 09 - Using Spark to curate Transaction data
+## 13 - Using Spark to curate Transaction data
 
 **Goal:** Join the raw transaction and merchant Iceberg tables to produce a curated, denormalized table that is ready for reporting without any further joins. This is the "silver layer" in a typical lakehouse architecture.
 
@@ -1282,47 +1772,57 @@ Start a Spark session in Jupyter (navigate to <http://dataplatform:28888> and us
 
 ```python
 import os
+
 # get the accessKey and secretKey from Environment
-accessKey = os.environ['AWS_ACCESS_KEY_ID']
-secretKey = os.environ['AWS_SECRET_ACCESS_KEY']
+accessKey = os.environ["AWS_ACCESS_KEY_ID"]
+secretKey = os.environ["AWS_SECRET_ACCESS_KEY"]
 
 from pyspark.sql import SparkSession
+
 spark = (
-    SparkSession.builder
-        .appName("Jupyter")
-        .master("spark://spark-master:7077")
-
-        .config("spark.jars.packages",
-                "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
-                "org.apache.iceberg:iceberg-aws-bundle:1.10.1")
-
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.access.key", accessKey)
-        .config("spark.hadoop.fs.s3a.secret.key", secretKey)
-        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
-
-        # ==== Iceberg catalog (Hive Metastore Iceberg REST Catalog) ===
-        .config("spark.sql.catalog.hive_iceberg_rest", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.hive_iceberg_rest.type", "rest")
-        .config("spark.sql.catalog.hive_iceberg_rest.uri", "http://hive-metastore:9084/iceberg")
-        .config("spark.sql.catalog.hive_iceberg_rest.warehouse", "s3a://admin-bucket/iceberg/warehouse")
-        .config("spark.sql.catalog.hive_iceberg_rest.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.endpoint", "http://rustfs-1:9000")
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.access-key-id", accessKey)
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.secret-access-key", secretKey)
-        .config("spark.sql.catalog.hive_iceberg_rest.s3.path-style-access", "true")
-    
-        # use "hive_iceberg" as the default catalog
-        .config("spark.sql.defaultCatalog", "hive_iceberg_rest")
-
-        .config(
-            "spark.sql.extensions",
-            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
-        )
-
-        .getOrCreate()
+    SparkSession.builder.appName("Jupyter")
+    .master("spark://spark-master:7077")
+    .config(
+        "spark.jars.packages",
+        "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
+        "org.apache.iceberg:iceberg-aws-bundle:1.10.1",
+    )
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+    .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
+    .config("spark.hadoop.fs.s3a.path.style.access", "true")
+    .config("spark.hadoop.fs.s3a.access.key", accessKey)
+    .config("spark.hadoop.fs.s3a.secret.key", secretKey)
+    .config(
+        "spark.hadoop.fs.s3a.aws.credentials.provider",
+        "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+    )
+    # ==== Iceberg catalog (Hive Metastore Iceberg REST Catalog) ===
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest", "org.apache.iceberg.spark.SparkCatalog"
+    )
+    .config("spark.sql.catalog.hive_iceberg_rest.type", "rest")
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.uri", "http://hive-metastore:9084/iceberg"
+    )
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.warehouse",
+        "s3a://admin-bucket/iceberg/warehouse",
+    )
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.io-impl",
+        "org.apache.iceberg.aws.s3.S3FileIO",
+    )
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.endpoint", "http://rustfs-1:9000")
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.access-key-id", accessKey)
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.secret-access-key", secretKey)
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.path-style-access", "true")
+    # use "hive_iceberg" as the default catalog
+    .config("spark.sql.defaultCatalog", "hive_iceberg_rest")
+    .config(
+        "spark.sql.extensions",
+        "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+    )
+    .getOrCreate()
 )
 ```
 
@@ -1388,9 +1888,9 @@ LEFT JOIN refdata_db.raw_merchant_t m
 result_df = spark.sql(query)
 
 # Write to Iceberg table
-result_df.write.format("iceberg") \
-    .mode("overwrite") \
-    .saveAsTable("payment_db.cur_transaction_with_merchant_sql_t")
+result_df.write.format("iceberg").mode("overwrite").saveAsTable(
+    "payment_db.cur_transaction_with_merchant_sql_t"
+)
 ```
 
 Verify the curated table was created and contains data:
@@ -1411,12 +1911,9 @@ transactions_df = spark.table("payment_db.raw_transaction_t")
 merchants_df = spark.table("refdata_db.raw_merchant_t")
 
 # Join and compute new columns
-result_df = transactions_df.alias("t") \
-    .join(
-        merchants_df.alias("m"),
-        col("t.merchant_id") == col("m.merchant_id"),
-        "left"
-    ) \
+result_df = (
+    transactions_df.alias("t")
+    .join(merchants_df.alias("m"), col("t.merchant_id") == col("m.merchant_id"), "left")
     .select(
         col("t.transaction_id"),
         col("t.card_number"),
@@ -1424,17 +1921,20 @@ result_df = transactions_df.alias("t") \
         col("t.amount"),
         col("t.channel"),
         col("t.transaction_date"),
-        concat_ws(" ", col("m.name"), upper(col("m.city")), col("m.country")).alias("booking_text"),
+        concat_ws(" ", col("m.name"), upper(col("m.city")), col("m.country")).alias(
+            "booking_text"
+        ),
         col("m.name"),
         col("m.country"),
         col("m.city"),
-        col("m.category_name")
+        col("m.category_name"),
     )
+)
 
 # Write to Iceberg table
-result_df.write.format("iceberg") \
-    .mode("overwrite") \
-    .saveAsTable("payment_db.cur_transaction_with_merchant_t")
+result_df.write.format("iceberg").mode("overwrite").saveAsTable(
+    "payment_db.cur_transaction_with_merchant_t"
+)
 ```
 
 Verify the DataFrame-based curated table:
@@ -1453,7 +1953,7 @@ show tables in payment_db
 
 > **What you should see:** Three tables listed: `raw_transaction_t`, `cur_transaction_with_merchant_sql_t`, and `cur_transaction_with_merchant_t`. The curated tables should contain the same data — both approaches produce equivalent results.
 
-## 10 - Curation Card Holder Data
+## 14 - Curation Card Holder Data
 
 **Goal:** Normalize the nested cardholder data from `customer_db.raw_card_holder_t` into flat, joinable Iceberg tables that can be queried efficiently by Trino (as used in section 10) and Spark.
 
@@ -1648,7 +2148,7 @@ WHEN NOT MATCHED THEN INSERT *
 
 > **What just happened?** Spark read the raw nested Iceberg table and used three `MERGE INTO` statements to upsert data into the three flat curated tables. The `cur_card_t` table is especially important because it links `card_number` (used in transactions) to `person_id` (used in `cur_person_t`) — enabling the full transaction-to-person join that was demonstrated in section 10.
 
-## 11 - Using Trino to query and curate
+## 15 - Using Trino to query and curate
 
 **Goal:** Use Trino's federated query engine to join Iceberg tables on object storage with live PostgreSQL data in a single SQL statement, and understand when this is preferable to waiting for Spark curation jobs to run.
 

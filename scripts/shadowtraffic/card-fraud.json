@@ -101,20 +101,6 @@
                         }
                     }
                 },
-                "card": {
-                    "number": {
-                        "_gen": "string",
-                        "expr": "#{Business.creditCardNumber}"
-                    },
-                    "type": {
-                        "_gen": "string",
-                        "expr": "#{Business.creditCardType}"
-                    },
-                    "expiryDate": {
-                        "_gen": "string",
-                        "expr": "#{Business.creditCardExpiry}"
-                    }
-                },
                 "usualCountries": {
                     "_gen": "repeatedly",
                     "n": 5,
@@ -160,16 +146,93 @@
             }
         },
         {
+            "name": "genCardNumbers",
+            "connection": "pg",
+            "table": "card_numbers",
+            "row": {
+                "number": {
+                    "_gen": "string",
+                    "expr": "#{Business.creditCardNumber}"
+                },
+                "type": {
+                    "_gen": "string",
+                    "expr": "#{Business.creditCardType}"
+                },
+                "expiry_date": {
+                    "_gen": "string",
+                    "expr": "#{Business.creditCardExpiry}"
+                }
+            },
+            "localConfigs": {
+                "maxEvents": 1000,
+                "throttleMs": 0
+            }
+        },
+        {
+            "name": "genCards",
+            "connection": "cardWebhook",
+            "url": "http://lhbank-cardholder-app:8082/api/cards",
+            "method": "POST",
+            "fork": {
+                "key": {
+                    "_gen": "lookup",
+                    "name": "genCardHolders",
+                    "path": ["data", "id"]
+                },
+                "stagger": {
+                    "ms": {
+                        "_gen": "uniformDistribution",
+                        "bounds": [0, 50000]
+                    }
+                }
+            },
+            "vars": {
+                "card_number": {
+                    "_gen": "lookup",
+                    "name": "genCardNumbers",
+                    "path": ["row", "number"]
+                }
+            },
+            "data": {
+                "cardHolderId": {
+                    "_gen": "var",
+                    "var": "forkKey"
+                },
+                "number": {
+                    "_gen": "var",
+                    "var": "card_number"
+                },
+                "type": {
+                    "_gen": "string",
+                    "expr": "#{Business.creditCardType}"
+                },
+                "expiryDate": {
+                    "_gen": "string",
+                    "expr": "#{Business.creditCardExpiry}"
+                }
+            },
+            "localConfigs": {
+                "maxEvents": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [1, 4],
+                    "decimals": 0
+                },
+                "throttleMs": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [3600000, 86400000]
+                }
+            }
+        },
+        {
             "name": "genBlacklistedMerchants",
             "connection": "pg",
             "table": "blacklisted_merchants",
             "row": {
                 "merchant_id": {
                     "_gen": "lookup",
-                    "connection": "kafka",
-                    "topic": "pub.ref.merchant.state.v1",
+                    "name": "genMerchants",
                     "path": [
-                        "key"
+                        "row", "merchant_id"
                     ]
                 },
 
@@ -201,22 +264,19 @@
         },
         {
             "name": "genMerchants",
-            "connection": "kafka",
-            "topic": "pub.ref.merchant.state.v1",
+            "connection": "pg",
+            "table": "merchants",
             "vars": {
                 "merchant_id": {
                     "_gen": "sequentialString",
                     "expr": "merchant-~d"
                 }
             },
-            "key": {
-                "_gen": "var",
-                "var": "merchant_id"
-            },
-            "value": {
+            "row": {
                 "merchant_id": {
                     "_gen": "var",
-                    "var": "merchant_id"
+                    "var": "merchant_id",
+                    "pgHint": "TEXT PRIMARY KEY"
                 },
                 "name": {
                     "_gen": "string",
@@ -233,7 +293,8 @@
                 "category_name": {
                     "_gen": "string",
                     "expr": "#{Commerce.department}"
-                }              
+                },
+                "status": "ACTIVE"
             },
             "localConfigs": {
                 "throttleMs": {
@@ -253,18 +314,16 @@
             "vars": {
                 "card_number": {
                     "_gen": "lookup",
-                    "name": "genCardHolders",
+                    "name": "genCardNumbers",
                     "path": [
-                        "data","card", "number"
+                        "row", "number"
                     ]
                 },
                 "merchant_id": {
                     "_gen": "lookup",
-                    "connection": "kafka",
-                    "topic": "pub.ref.merchant.state.v1",
+                    "name": "genMerchants",
                     "path": [
-                        "value",
-                        "merchant_id"
+                        "row", "merchant_id"
                     ]
                 }
             },
@@ -339,6 +398,7 @@
             {
                 "generators": [
                     "genMerchants",
+                    "genCardNumbers",
                     "genCardHolders"
                 ],
                 "overrides": {
@@ -352,7 +412,21 @@
             },
             {
                 "generators": [
+                    "genCardHolders"
+                ],
+                "overrides": {
+                    "genCardHolders": {
+                        "localConfigs": {
+                            "maxEvents": 2,
+                            "throttleMs": 30000
+                        }
+                    }
+                }
+            },
+            {
+                "generators": [
                     "genCardHolders",
+                    "genCards",
                     "genCardTransactions"
                 ]
             }
@@ -411,6 +485,10 @@
         },
         "cardHolderWebhook": {
             "kind": "webhook"
+        },
+        "cardWebhook": {
+            "kind": "webhook"
         }
+
     }
 }
