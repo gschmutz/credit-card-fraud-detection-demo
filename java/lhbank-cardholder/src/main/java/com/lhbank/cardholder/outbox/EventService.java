@@ -46,15 +46,16 @@ public class EventService {
     @EventListener
     public void handleOutboxEvent(OutboxEvent event) {
 
-        UUID uuid = UUID.randomUUID();
-        OutboxDO entity = new OutboxDO(
-                uuid,
-                event.getAggregateId(),
-                event.getEventType(),
-                event.getEventKey() != null ? event.getEventKey() : event.getAggregateId(),
-                event.getPayloadAvro(),
-                Instant.now()
-        );
+        Instant now = Instant.now();
+        OutboxDO entity = OutboxDO.builder()
+                .id(UUID.randomUUID())
+                .aggregateId(event.getAggregateId())
+                .eventType(event.getEventType())
+                .eventKey(event.getEventKey() != null ? event.getEventKey() : event.getAggregateId())
+                .payloadAvro(event.getPayloadAvro())
+                .createdAt(now)
+                .createdAtEpoch(now.toEpochMilli())
+                .build();
 
         LOGGER.info("Handling event : {}.", entity);
 
