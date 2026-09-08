@@ -9,6 +9,7 @@ import com.lhbank.cardholder.repository.CardRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -28,8 +29,12 @@ public class CardService {
         this.cardHolderStateProducer = cardHolderStateProducer;
     }
 
+    @Transactional
     public Long addCard(CardDTO cardDTO) {
         LOGGER.info("addCard(cardHolderId={})", cardDTO.cardHolderId());
+
+        Person person = cardHolderRepository.findById(cardDTO.cardHolderId())
+                .orElseThrow(() -> new NoSuchElementException("CardHolder not found: " + cardDTO.cardHolderId()));
 
         var card = new Card();
         card.setNumber(cardDTO.number());
@@ -38,12 +43,6 @@ public class CardService {
         person.addCard(card);
 
         cardRepository.save(card);
-
-        // retrieve person
-        Person person = cardHolderRepository.findById(cardDTO.cardHolderId())
-                .orElseThrow(() -> new NoSuchElementException("CardHolder not found: " + cardDTO.cardHolderId()));
-
-        // and publish state event
         cardHolderStateProducer.send(person);
         return card.getId();
     }
