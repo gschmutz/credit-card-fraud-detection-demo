@@ -18,22 +18,18 @@ The platform for this demo has been created using the [Platys - Platform in a bo
 - [00 - Starting the Platform](#00---starting-the-platform)
 - [01 - Credit Card Transaction Stream](#01---credit-card-transaction-stream)
 - [02 - Exploring Streams using Flink SQL with the Hive Metastore Catalog](#02---exploring-streams-using-flink-sql-with-the-hive-metastore-catalog)
-- [04 - Merchant Data](#04---merchant-data)
-- [05 - CardHolder Application (OLTP)](#05---cardholder-application-oltp)
-- [06 - Stream Enabling the CardHolder Application](#06---stream-enabling-the-cardholder-application)
-- [07 - Provide Geonames data (optional)](#07---provide-geonames-data-optional)
-- [08 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment](#08---fraud-detection---blocked-merchant-flagging-and-merchant-enrichment)
-- [09 - Fraud Detection - Enrich with CardHolder Data](#09---fraud-detection---enrich-with-cardholder-data)
-- [10 - Fraud Detection - Advanced Fraud Detection Patterns](#10---fraud-detection---advanced-fraud-detection-patterns)
-- [11 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect](#11---write-kafka-data-as-iceberg-tables-to-s3-object-storage-using-kafka-connect)
-- [12 - Validate the ingest by querying the Iceberg table using Spark SQL](#12---validate-the-ingest-by-querying-the-iceberg-table-using-spark-sql)
-- [13 - Using Spark to curate Transaction data](#13---using-spark-to-curate-transaction-data)
-- [14 - Curation Card Holder Data](#14---curation-card-holder-data)
-- [15 - Using Trino to query and curate](#15---using-trino-to-query-and-curate)
-
-
-
-
+- [03 - Merchant Data](#03---merchant-data)
+- [04 - CardHolder Application (OLTP)](#04---cardholder-application-oltp)
+- [05 - Stream Enabling the CardHolder Application](#05---stream-enabling-the-cardholder-application)
+- [06 - Provide Geonames data (optional)](#06---provide-geonames-data-optional)
+- [07 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment](#07---fraud-detection---blocked-merchant-flagging-and-merchant-enrichment)
+- [08 - Fraud Detection - Enrich with CardHolder Data](#08---fraud-detection---enrich-with-cardholder-data)
+- [09 - Fraud Detection - Advanced Fraud Detection Patterns](#09---fraud-detection---advanced-fraud-detection-patterns)
+- [10 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect](#10---write-kafka-data-as-iceberg-tables-to-s3-object-storage-using-kafka-connect)
+- [11 - Validate the ingest by querying the Iceberg table using Spark SQL](#11---validate-the-ingest-by-querying-the-iceberg-table-using-spark-sql)
+- [12 - Using Spark to curate Transaction data](#12---using-spark-to-curate-transaction-data)
+- [13 - Curation Card Holder Data](#13---curation-card-holder-data)
+- [14 - Using Trino to query and curate](#14---using-trino-to-query-and-curate)
 
 ## Prerequisites
 
@@ -89,6 +85,77 @@ docker compose --profile test up -d
 This will begin populating `priv.pay.transaction.delta.v1` and `pub.ref.merchant.state.v1` with synthetic data.
 
 > **What just happened?** ShadowTraffic reads the generator config in `scripts/shadowtraffic/card-fraud.json` and continuously produces realistic synthetic credit card transactions and merchant records to Kafka. Transactions include randomized card numbers, amounts, merchant IDs, channels, and dates. Merchant records include names, categories, cities, and countries.
+
+### Kafka Topic Setup with Jikkou
+
+[Jikkou](https://www.jikkou.io/) is a GitOps-style command-line tool for managing Kafka resources — topics, ACLs, schema subjects, consumer groups — as versioned, declarative YAML files. Instead of running `kafka-topics.sh` commands by hand, you describe the desired state once in a spec file and let Jikkou reconcile the cluster to match it. Jikkou only changes what differs from the spec, so re-applying the same file is always safe (idempotent).
+
+In this platform Kafka is configured with `auto.create.topics.enable = false`, which means every topic we produce to must exist before the simulator starts. Jikkou is the right tool for this: it lets you keep the topic definitions in source control alongside the rest of the workshop and recreate them reliably in any environment.
+
+### The topic spec file
+
+The file `card-topic-specs.yml` in folder `./scripts/jikkou` defines the topics created upon start of the platform as a single `KafkaTopicList` resource. 
+
+```yaml
+apiVersion: "kafka.jikkou.io/v1beta2"
+kind: "KafkaTopicList"
+metadata: {}
+items:
+  - metadata:
+      name: 'priv.pay.transaction.delta.v1'
+    spec:
+      partitions: 2
+      replicas: 3
+      configs:
+        cleanup.policy: delete
+        segment.bytes: 104857600
+
+  - metadata:
+      name: 'pub.cus.cardHolder.state.v1'
+    spec:
+      partitions: 2
+      replicas: 3
+      configs:
+        cleanup.policy: compact
+        segment.ms: 100
+        delete.retention.ms: 100
+        min.cleanable.dirty.ratio: 0.001
+
+  - metadata:
+      name: 'pub.ref.merchant.state.v1'
+    spec:
+      partitions: 2
+      replicas: 3
+      configs:
+        cleanup.policy: compact
+        segment.ms: 100
+        delete.retention.ms: 100
+        min.cleanable.dirty.ratio: 0.001
+
+  - metadata:
+      name: 'pub.ref.geonames.state.v1'
+    spec:
+      partitions: 1
+      replicas: 3
+      configs:
+        cleanup.policy: compact
+        segment.ms: 100
+        delete.retention.ms: 100
+        min.cleanable.dirty.ratio: 0.001
+
+```
+
+We will later add to that file when more topics are needed.
+
+What each topic is for and why the settings differ:
+
+| Topic | `cleanup.policy` | Purpose |
+|---|---|---|
+| `priv.pay.transaction.delta.v1` | `delete` | Append-only transaction event stream. Records can expire after the retention window — old events do not need to be replayed forever. |
+| `pub.cus.cardHolder.state.v1` | `compact` | Keyed cardholder reference state. Same reasoning as the blacklist — lookups must always return the current record. |
+| `pub.ref.merchant.state.v1` | `compact` | Keyed merchant reference state. Flink's upsert-kafka connector reads this as a changelog table. |
+
+The aggressive compaction settings (`segment.ms: 100`, `delete.retention.ms: 100`, `min.cleanable.dirty.ratio: 0.001`) on the compacted topics cause the log cleaner to run almost immediately, so tombstone records are removed quickly and the topic stays lean.
 
 ## 01 - Credit Card Transaction Stream
 
@@ -372,16 +439,16 @@ This is due to the configuration of the Hive Metastore catalog. Flink ships with
 
 Querying the raw transaction stream already reveals patterns, but a `merchant_id` alone is not enough to flag fraud or explain it. The next sections bring in the reference data — merchants and cardholders — that the detection pipeline needs to make decisions and produce actionable alerts.
 
-## 04 - Merchant Data
+## 03 - Merchant Data
 
 **Goal:** Stream merchant reference data from a legacy application database into Kafka using Debezium log-based CDC, and understand why that data is needed in two places in the fraud detection pipeline: blocking transactions at suspicious merchants and enriching flagged transactions with human-readable context.
 
 Merchant data drives two distinct steps in this pipeline, and both require the same reference dataset to be continuously available as a Kafka topic:
 
-**1. Blocking — merchant blacklist join (section 08)**
+**1. Blocking — merchant blacklist join (section 07)**
 Fraud operations teams maintain lists of merchants associated with fraudulent activity. Every incoming transaction is checked against this blacklist via a real-time stream-table join on `merchant_id` — a match flags the transaction immediately. The merchant reference data provides the stable set of IDs that blacklist entries refer to.
 
-**2. Enrichment — adding context to flagged transactions (section 08)**
+**2. Enrichment — adding context to flagged transactions (section 07)**
 A raw transaction carries only a `merchant_id` foreign key. Analysts need human-readable context — merchant name, city, country, and category — to act on a flag without manual lookup. Joining each transaction against the merchant reference table adds exactly that.
 
 Merchant data lives in a legacy application's PostgreSQL database. Before stream-enabling it, confirm that the data is there by querying the table directly:
@@ -463,7 +530,7 @@ merchant-198: {"merchant_id": "merchant-198", "name": {"string": "Brakus-Schowal
 
 > **What you should see:** Merchant records keyed by plain `merchant_id` strings (e.g. `merchant-187`), with a flat JSON or Avro value containing the current row fields. If the topic is empty, confirm that the `merchant` table in PostgreSQL has rows and that the connector status is `RUNNING` in Kafka Connect.
 
-## 05 - CardHolder Application (OLTP)
+## 04 - CardHolder Application (OLTP)
 
 **Goal:** Understand the structure of the source OLTP database that the `lhbank-cardholder` Spring Boot service writes to. This gives you a baseline understanding of what data will later be streamed into Kafka.
 
@@ -475,7 +542,7 @@ List all tables in the `customer_db` database:
 docker exec -ti postgresql psql -d customer_db -U customer -c "\dt"
 ```
 
-> **What you should see:** A list of tables including `person`, `address`, `country`, `card`, and `outbox`. The `outbox` table is the key table used by the transactional outbox pattern (covered later in section 06). The other tables are part of the 3rd normal form data model of the CardHolder application.
+> **What you should see:** A list of tables including `person`, `address`, `country`, `card`, and `outbox`. The `outbox` table is the key table used by the transactional outbox pattern (covered later in section 05). The other tables are part of the 3rd normal form data model of the CardHolder application.
 
 Lets preview part of the `person` and `address` tables:
 
@@ -507,9 +574,9 @@ Describe the `address` table:
 
 If you perform a `SELECT COUNT(*) FROM person` a few times with some time inbetween you should see the count increase due to the new cardHolders created by the simulator. 
 
-> **What just happened?** You have confirmed that the source OLTP database is running and contains cardholder data. The `person` and `address` tables hold the core business data, while the `outbox` table (visible in `\dt`) will be used by Debezium in section 06 to propagate changes to Kafka without dual writes.
+> **What just happened?** You have confirmed that the source OLTP database is running and contains cardholder data. The `person` and `address` tables hold the core business data, while the `outbox` table (visible in `\dt`) will be used by Debezium in section 05 to propagate changes to Kafka without dual writes.
 
-## 06 - Stream Enabling the CardHolder Application
+## 05 - Stream Enabling the CardHolder Application
 
 **Goal:** Capture cardholder data changes from PostgreSQL into Kafka topics using Kafka Connect. 
 
@@ -636,11 +703,11 @@ An alternative to a physical outbox table is a virtual outbox implemented as a d
 
 ![](./images/virtual-outbox.png)
 
-## 07 - Provide Geonames data (optional)
+## 06 - Provide Geonames data (optional)
 
-**Goal:** Load city geolocation data into Kafka so that transaction city names can be enriched with latitude/longitude coordinates in section 08.
+**Goal:** Load city geolocation data into Kafka so that transaction city names can be enriched with latitude/longitude coordinates in section 07.
 
-This section loads the [GeoNames](https://www.geonames.org/) `cities1000.txt` dataset — a tab-separated file of all cities with a population over 1,000 — into the `pub.ref.geonames.state.v1` Kafka topic. The Flink SQL geo enrichment step in section 08 reads this topic to attach latitude/longitude coordinates to transaction city names.
+This section loads the [GeoNames](https://www.geonames.org/) `cities1000.txt` dataset — a tab-separated file of all cities with a population over 1,000 — into the `pub.ref.geonames.state.v1` Kafka topic. The Flink SQL geo enrichment step in section 07 reads this topic to attach latitude/longitude coordinates to transaction city names.
 
 The notebook for this step is `jupyter/10-cities-for-geo-location.ipynb`.
 
@@ -760,9 +827,9 @@ kafka_df.write.format("kafka").option(
 ).option("topic", "pub.ref.geonames.state.v1").save()
 ```
 
-> **What just happened?** Spark read roughly 150,000 city records from the GeoNames file in RustFS and wrote each one as a JSON message to Kafka. The `pub.ref.geonames.state.v1` topic now acts as a reference lookup table that Flink SQL can join against in the geo enrichment step in section 08.
+> **What just happened?** Spark read roughly 150,000 city records from the GeoNames file in RustFS and wrote each one as a JSON message to Kafka. The `pub.ref.geonames.state.v1` topic now acts as a reference lookup table that Flink SQL can join against in the geo enrichment step in section 07.
 
-## 08 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment
+## 07 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment
 
 **Goal:** Build a multi-stage streaming fraud detection pipeline in FlinkSQL that progressively enriches and scores each transaction. By the end of this section, every transaction flowing through Kafka will carry a fraud flag and a reason code.
 
@@ -947,7 +1014,7 @@ SELECT * FROM pay_transaction_flagged_t WHERE is_flagged = 1;
 
 > **What just happened?** Flink submitted a persistent streaming job that runs on the cluster independently of the SQL client session. Every new record on `priv.pay.transaction.delta.v1` is joined against the current blacklist state and the result is written to `priv.pay.transaction-flagged.delta.v1`. Because `ref_merchant_t` uses the upsert-kafka connector, Flink maintains an in-memory state of the latest value per merchant key — adding a merchant to the blacklist after the job starts immediately affects subsequent transactions.
 
-## 09 - Fraud Detection - Enrich with CardHolder Data
+## 08 - Fraud Detection - Enrich with CardHolder Data
 
 The blocked merchants join flags known-bad merchants. 
 
@@ -1176,7 +1243,7 @@ FROM pay_transaction_flagged2_t
 WHERE is_flagged > 0;
 ```
 
-## 10 - Fraud Detection - Advanced Fraud Detection Patterns
+## 09 - Fraud Detection - Advanced Fraud Detection Patterns
 
 This section adds a complementary fraud signal that does not require an external reference list — it derives suspicion entirely from patterns within the transaction stream itself using `MATCH_RECOGNIZE`.
 
@@ -1341,7 +1408,7 @@ WHERE is_flagged > 0;
 
 > **What you should see:** Transactions flagged with one or more reasons: `'blocked'` (merchant blocked), `'high-amount'` (amount exceeded cardholder's personal average), `'card-testing'` (large transaction preceded by a small probe on the same card), or any combination such as `'blocked,high-amount'`.
 
-## 11 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect
+## 10 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect
 
 **Goal:** Persistently land all streaming data — raw transactions, flagged transactions, merchant reference data, and cardholder events — into durable Iceberg tables on object storage. This makes the data available for batch analytics with Spark and Trino even after the Kafka topic retention window has passed.
 
@@ -1451,7 +1518,7 @@ curl -X PUT \
 
 #### Create and write to `payment_db.raw_transaction_flagged_t`
 
-This table captures the output of the Flink SQL flagging pipeline from section 08. It includes the `is_flagged` and `flagged_reason` columns that let analysts query only suspicious transactions.
+This table captures the output of the Flink SQL flagging pipeline from section 07. It includes the `is_flagged` and `flagged_reason` columns that let analysts query only suspicious transactions.
 
 First let's create the Iceberg table using Spark SQL:
 
@@ -1579,7 +1646,7 @@ The `pub.cus.cardHolder.state.v1` topic carries nested Avro events with the full
 
 #### Create and write to `customer_db.raw_card_holder_t`
 
-The cardholder Avro schema uses nested structs and arrays. The Iceberg table is defined with a matching nested `STRUCT` column so the full hierarchy is preserved. In section 14, this raw table will be normalized into flat, joinable tables.
+The cardholder Avro schema uses nested structs and arrays. The Iceberg table is defined with a matching nested `STRUCT` column so the full hierarchy is preserved. In section 13, this raw table will be normalized into flat, joinable tables.
 
 First create the table using Spark SQL:
 
@@ -1655,9 +1722,9 @@ curl -X PUT \
 	}'
 ```
 
-## 12 - Validate the ingest by querying the Iceberg table using Spark SQL
+## 11 - Validate the ingest by querying the Iceberg table using Spark SQL
 
-**Goal:** Confirm that the Kafka Connect Iceberg sink connectors registered in section 11 are working correctly by querying the Iceberg tables and verifying that data has arrived.
+**Goal:** Confirm that the Kafka Connect Iceberg sink connectors registered in section 10 are working correctly by querying the Iceberg tables and verifying that data has arrived.
 
 Once the Kafka Connect connectors are running, verify that data is arriving in the Iceberg tables. Use either the Spark SQL CLI or the Jupyter notebook at <http://dataplatform:28888>.
 
@@ -1743,7 +1810,7 @@ spark = (
 %sql spark
 ```
 
-Inspect the schema of the transaction table to confirm it matches what was defined in section 11:
+Inspect the schema of the transaction table to confirm it matches what was defined in section 10:
 
 ```sql
 %%sql
@@ -1766,7 +1833,7 @@ SELECT * FROM payment_db.raw_transaction_flagged_t;
 
 > **What you should see:** Rows in both tables. The `raw_transaction_flagged_t` table should include `is_flagged` and `flagged_reason` columns. Rows with `is_flagged = 1` confirm that the end-to-end pipeline — from ShadowTraffic through Kafka, Flink SQL, and Kafka Connect — is working.
 
-## 13 - Using Spark to curate Transaction data
+## 12 - Using Spark to curate Transaction data
 
 **Goal:** Join the raw transaction and merchant Iceberg tables to produce a curated, denormalized table that is ready for reporting without any further joins. This is the "silver layer" in a typical lakehouse architecture.
 
@@ -1959,9 +2026,9 @@ show tables in payment_db
 
 > **What you should see:** Three tables listed: `raw_transaction_t`, `cur_transaction_with_merchant_sql_t`, and `cur_transaction_with_merchant_t`. The curated tables should contain the same data — both approaches produce equivalent results.
 
-## 14 - Curation Card Holder Data
+## 13 - Curation Card Holder Data
 
-**Goal:** Normalize the nested cardholder data from `customer_db.raw_card_holder_t` into flat, joinable Iceberg tables that can be queried efficiently by Trino (as used in section 15) and Spark.
+**Goal:** Normalize the nested cardholder data from `customer_db.raw_card_holder_t` into flat, joinable Iceberg tables that can be queried efficiently by Trino (as used in section 14) and Spark.
 
 The raw cardholder Iceberg table stores each cardholder event as a nested struct with arrays (addresses, usual_countries). This curation step normalizes the data into three flat relational tables suitable for SQL joins:
 
@@ -2156,9 +2223,9 @@ WHEN NOT MATCHED THEN INSERT *
 """)
 ```
 
-> **What just happened?** Spark read the raw nested Iceberg table and used three `MERGE INTO` statements to upsert data into the three flat curated tables. The `cur_card_t` table is especially important because it links `card_number` (used in transactions) to `person_id` (used in `cur_person_t`) — enabling the full transaction-to-person join that was demonstrated in section 15.
+> **What just happened?** Spark read the raw nested Iceberg table and used three `MERGE INTO` statements to upsert data into the three flat curated tables. The `cur_card_t` table is especially important because it links `card_number` (used in transactions) to `person_id` (used in `cur_person_t`) — enabling the full transaction-to-person join that was demonstrated in section 14.
 
-## 15 - Using Trino to query and curate
+## 14 - Using Trino to query and curate
 
 **Goal:** Use Trino's federated query engine to join Iceberg tables on object storage with live PostgreSQL data in a single SQL statement, and understand when this is preferable to waiting for Spark curation jobs to run.
 
@@ -2189,9 +2256,9 @@ LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
        ON t.merchant_id = m.merchant_id;
 ```
 
-> **What you should see:** Enriched transaction rows with merchant details, identical to the output from the Spark curation job in section 13 — but computed on demand without needing to pre-write a curated table.
+> **What you should see:** Enriched transaction rows with merchant details, identical to the output from the Spark curation job in section 12 — but computed on demand without needing to pre-write a curated table.
 
-Now join with the cardholder tables to add cardholder identity to each transaction. Two options are shown: using the curated Iceberg cardholder tables (populated in section 14) or querying directly from the live PostgreSQL source:
+Now join with the cardholder tables to add cardholder identity to each transaction. Two options are shown: using the curated Iceberg cardholder tables (populated in section 13) or querying directly from the live PostgreSQL source:
 
 ```sql
 SELECT t.transaction_id,
@@ -2216,7 +2283,7 @@ LEFT JOIN iceberg_hive_rest.customer_db.cur_person_t p
  		ON c.person_id = p.person_id;
 ```
 
-Alternatively, query directly from the PostgreSQL source system — useful before the cardholder curation pipeline (section 14) has run:
+Alternatively, query directly from the PostgreSQL source system — useful before the cardholder curation pipeline (section 13) has run:
 
 ```sql
 SELECT t.transaction_id,
