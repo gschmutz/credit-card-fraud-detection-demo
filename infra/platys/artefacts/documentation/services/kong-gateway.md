@@ -7,10 +7,10 @@ Kong Gateway is a lightweight, fast, and flexible cloud-native API gateway. An A
 ## How to enable?
 
 ```
-platys init --enable-services KONG
+platys init --enable-services KONG_GATEWAY
 platys gen
 ```
 
 ## How to use it?
 
-Navigate to <http://dataplatform:8002>
+Navigate to <http://localhost:8002>

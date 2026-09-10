@@ -303,7 +303,7 @@
       #
       # ===== kcat (used to be kafkacat) ========
       #
-      KCAT_enable: false
+      KCAT_enable: true
       #
       # ===== kaskade ========
       #
@@ -527,12 +527,12 @@
       #
       # ===== Apache Spark ========
       #
-      SPARK_enable: true
+      SPARK_enable: false
       # either 3.3 or 3.4 or 3.5
       SPARK_base_version: 3.5
       # "hive" or "in-memory"
       SPARK_catalog: in-memory
-      SPARK_workers: 2
+      SPARK_workers: 1
       # to restrict the default cores, use '-Dspark.deploy.defaultCores=6'
       SPARK_master_opts: ''
       SPARK_worker_cores:
@@ -586,10 +586,12 @@
       #
       # ===== Apache Flink ========
       #
-      FLINK_enable: false
+      FLINK_enable: true
+      FLINK_1_20_version: 1.20.5-scala_2.12
       # deployment mode, either 'session' or 'application'
       FLINK_deployment_mode: 'session'
       FLINK_taskmanagers: 1
+      FLINK_taskmanagers_memory_process_size: 3072m     
       FLINK_enable_build_in_plugins: ''
       FLINK_install_maven_dep: ''
       FLINK_install_file_dep: ''
@@ -597,7 +599,7 @@
       FLINK_python_enabled: false
       FLINK_python_provide_requirements_file: false
       FLINK_python_version: '3.10'
-      FLINK_SQL_CLI_enable: false
+      FLINK_SQL_CLI_enable: true
       #FLINK_SQL_CLI_mode: 'embedded'
       
       FLINK_SQL_GATEWAY_enable: false
@@ -1549,7 +1551,7 @@
       #
       # ===== Grafana ========
       #
-      GRAFANA_enable: true 
+      GRAFANA_enable: false 
       # list of preview features to enable (tempoSearch, tempoServiceGraph, ... see https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/feature-toggles/)
       GRAFANA_feature_toggles: ''
       # list of plugins to install (see here: https://grafana.com/grafana/plugins/) 
@@ -1576,7 +1578,7 @@
       #
       # ===== Lightdash ========
       #
-      LIGHTDASH_enable: true
+      LIGHTDASH_enable: false
       LIGHTDASH_volume_map_dbt_project: false
       LIGHTDASH_dbt_project_path:
       LIGHTDASH_secret: 'changeme-use-a-long-random-secret-here'
@@ -2051,7 +2053,7 @@
       #
       # ===== Prometheus ========
       #
-      PROMETHEUS_enable: true
+      PROMETHEUS_enable: false
       PROMETHEUS_volume_map_data: false
       PROMETHEUS_volume_map_custom_config: false
       PROMETHEUS_PUSHGATEWAY_enable: false
@@ -2242,7 +2244,7 @@
       #
       # ===== Cloudbeaver DB UI ========
       #
-      CLOUDBEAVER_enable: true
+      CLOUDBEAVER_enable: false
       CLOUDBEAVER_volume_map_workspace: false
       CLOUDBEAVER_admin_username: admin
       CLOUDBEAVER_admin_password: Abc123!abc123!

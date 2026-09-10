@@ -1,6 +1,6 @@
 services:
   lhbank-cardholder-app:
-    image: ghcr.io/gschmutz/lhbank-cardholder:main
+    image: ghcr.io/gschmutz/lhbank-cardholder:local-only-rustfs-trino
     container_name: lhbank-cardholder-app
     hostname: lhbank-cardholder-app
     labels:

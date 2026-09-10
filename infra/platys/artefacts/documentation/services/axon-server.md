@@ -7,10 +7,10 @@ Axon Server makes it significantly easier for the user to setup and maintain the
 ## How to enable?
 
 ```
-platys init --enable-services AXON
+platys init --enable-services AXON_SERVER
 platys gen
 ```
 
 ## How to use it?
 
-Navigate to <http://dataplatform:8024>
+Navigate to <http://localhost:8024>
