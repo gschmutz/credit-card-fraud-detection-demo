@@ -16,20 +16,20 @@ The platform for this demo has been created using the [Platys - Platform in a bo
 
 - [Prerequisites](#prerequisites)
 - [00 - Starting the Platform](#00---starting-the-platform)
-- [01 - Credit Card Transaction Stream](#01---credit-card-transaction-stream)
-- [02 - Exploring Streams using Flink SQL with the Hive Metastore Catalog](#02---exploring-streams-using-flink-sql-with-the-hive-metastore-catalog)
+- [01 - Viewing Credit Card Transaction Stream](#01---viewing-credit-card-transaction-stream)
 - [03 - Merchant Data](#03---merchant-data)
 - [04 - CardHolder Application (OLTP)](#04---cardholder-application-oltp)
 - [05 - Stream Enabling the CardHolder Application](#05---stream-enabling-the-cardholder-application)
 - [06 - Provide Geonames data (optional)](#06---provide-geonames-data-optional)
-- [07 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment](#07---fraud-detection---blocked-merchant-flagging-and-merchant-enrichment)
-- [08 - Fraud Detection - Enrich with CardHolder Data](#08---fraud-detection---enrich-with-cardholder-data)
-- [09 - Fraud Detection - Advanced Fraud Detection Patterns](#09---fraud-detection---advanced-fraud-detection-patterns)
-- [10 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect](#10---write-kafka-data-as-iceberg-tables-to-s3-object-storage-using-kafka-connect)
-- [11 - Validate the ingest by querying the Iceberg table using Spark SQL](#11---validate-the-ingest-by-querying-the-iceberg-table-using-spark-sql)
-- [12 - Using Spark to curate Transaction data](#12---using-spark-to-curate-transaction-data)
-- [13 - Curation Card Holder Data](#13---curation-card-holder-data)
-- [14 - Using Trino to query and curate](#14---using-trino-to-query-and-curate)
+- [07 - Exploring Kafka Streams using Flink SQL with the Hive Metastore Catalog](#07---exploring-kafka-streams-using-flink-sql-with-the-hive-metastore-catalog)
+- [08 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment](#08---fraud-detection---blocked-merchant-flagging-and-merchant-enrichment)
+- [09 - Fraud Detection - Enrich with CardHolder Data](#09---fraud-detection---enrich-with-cardholder-data)
+- [10 - Fraud Detection - Advanced Fraud Detection Patterns](#10---fraud-detection---advanced-fraud-detection-patterns)
+- [11 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect](#11---write-kafka-data-as-iceberg-tables-to-s3-object-storage-using-kafka-connect)
+- [12 - Validate the ingest by querying the Iceberg table using Spark SQL](#12---validate-the-ingest-by-querying-the-iceberg-table-using-spark-sql)
+- [13 - Using Spark to curate Transaction data](#13---using-spark-to-curate-transaction-data)
+- [14 - Curation Card Holder Data](#14---curation-card-holder-data)
+- [15 - Using Trino to query and curate](#15---using-trino-to-query-and-curate)
 
 ## Prerequisites
 
@@ -74,17 +74,6 @@ Wait for all services to be healthy before proceeding (typically 1–2 minutes).
 
 > **What you should see:** `docker compose ps` should show all containers in a `running` or `healthy` state. If any container is in a restart loop, check its logs with `docker compose logs <service-name>`.
 
-### Start simulator
-
-Traffic is generated using [ShadowTraffic](https://shadowtraffic.io/), which reads `scripts/shadowtraffic/card-fraud.json` and produces synthetic cardholders and transactions to Kafka. Start it once the base stack is running.
-
-```bash
-docker compose --profile test up -d
-```
-
-This will begin populating `priv.pay.transaction.delta.v1` and `pub.ref.merchant.state.v1` with synthetic data.
-
-> **What just happened?** ShadowTraffic reads the generator config in `scripts/shadowtraffic/card-fraud.json` and continuously produces realistic synthetic credit card transactions and merchant records to Kafka. Transactions include randomized card numbers, amounts, merchant IDs, channels, and dates. Merchant records include names, categories, cities, and countries.
 
 ### Kafka Topic Setup with Jikkou
 
@@ -157,7 +146,19 @@ What each topic is for and why the settings differ:
 
 The aggressive compaction settings (`segment.ms: 100`, `delete.retention.ms: 100`, `min.cleanable.dirty.ratio: 0.001`) on the compacted topics cause the log cleaner to run almost immediately, so tombstone records are removed quickly and the topic stays lean.
 
-## 01 - Credit Card Transaction Stream
+## 01 -  Simulating Transaction data traffic
+
+Traffic is generated using [ShadowTraffic](https://shadowtraffic.io/), which reads `scripts/shadowtraffic/card-fraud.json` and produces synthetic merchants, cardholders and credit card transactions to Kafka. Start it once the base stack is running.
+
+```bash
+docker compose --profile test up -d
+```
+
+This will begin populating `priv.pay.transaction.delta.v1` topic with synthetic data.
+
+> **What just happened?** ShadowTraffic reads the generator config in `scripts/shadowtraffic/card-fraud.json` and continuously produces realistic synthetic credit card transactions and merchant records to Kafka. Transactions include randomized card numbers, amounts, merchant IDs, channels, and dates. Merchant records include names, categories, cities, and countries.
+
+## 03 - Viewing Credit Card Transaction Stream
 
 **Goal:** Confirm that the synthetic transaction stream is flowing through Kafka and learn how to inspect it using command-line tools and the AKHQ UI.
 
@@ -171,7 +172,399 @@ kcat -b dataplatform -t priv.pay.transaction.delta.v1 -q -r http://dataplatform:
 
 Navigate to AKHQ: <http://dataplatform:28107> to view the `priv.pay.transaction.delta.v1` topic.
 
-## 02 - Exploring Streams using Flink SQL with the Hive Metastore Catalog
+Viewing the raw transaction stream alone does not reveal any patterns, but we can see that the existing data (i.e. only `merchant_id`) is not enough to flag fraud or explain it. The next sections bring in the additional context data — merchants and cardholders — that the detection pipeline needs to make decisions and produce actionable alerts.
+
+## 03 - Merchant Data
+
+**Goal:** Stream merchant reference data from a legacy application database into Kafka using Debezium log-based CDC, and understand why that data is needed in two places in the fraud detection pipeline: blocking transactions at suspicious merchants and enriching flagged transactions with human-readable context.
+
+Merchant data drives two distinct steps in this pipeline, and both require the same reference dataset to be continuously available as a Kafka topic:
+
+**1. Blocking — merchant blacklist join (section 08)**
+Fraud operations teams maintain lists of merchants associated with fraudulent activity. Every incoming transaction is checked against this blacklist via a real-time stream-table join on `merchant_id` — a match flags the transaction immediately. The merchant reference data provides the stable set of IDs that blacklist entries refer to.
+
+**2. Enrichment — adding context to flagged transactions (section 08)**
+A raw transaction carries only a `merchant_id` foreign key. Analysts need human-readable context — merchant name, city, country, and category — to act on a flag without manual lookup. Joining each transaction against the merchant reference table adds exactly that.
+
+Merchant data lives in a legacy application's PostgreSQL database. Before stream-enabling it, confirm that the data is there by querying the table directly:
+
+```bash
+docker exec -ti postgresql psql -U postgres -c "SELECT * FROM merchant LIMIT 10;"
+```
+
+and you should see data similar to shown below
+
+```bash
+ merchant_id |              name               | country |       city       |     category_name      | status
+-------------+---------------------------------+---------+------------------+------------------------+--------
+ merchant-0  | Mraz LLC                        | US      | New Johnnieview  | Baby, Beauty & Jewelry | ACTIVE
+ merchant-1  | Altenwerth LLC                  | US      | Earleville       | Electronics            | ACTIVE
+ merchant-2  | MacGyver-Lowe                   | US      | Leonardoborough  | Jewelry & Tools        | ACTIVE
+ merchant-3  | Hartmann and Sons               | US      | North German     | Music                  | ACTIVE
+ merchant-4  | Nikolaus, Krajcik and Dickinson | US      | Patrickstad      | Music                  | ACTIVE
+ merchant-5  | Kessler, Corkery and Klocko     | US      | West Malcolmstad | Movies                 | ACTIVE
+ merchant-6  | Bernhard-Mayert                 | US      | Tishahaven       | Computers              | ACTIVE
+ merchant-7  | Cremin and Sons                 | US      | New Rodrigoland  | Beauty & Grocery       | ACTIVE
+ merchant-8  | Gislason-Crona                  | US      | Hannahfort       | Games & Jewelry        | ACTIVE
+ merchant-9  | Legros, Tremblay and Marks      | US      | Yukburgh         | Beauty & Books         | ACTIVE
+(10 rows)
+```
+
+> **What you should see:** Rows with `merchant_id`, `name`, `country`, `city`, `category_name`, and `status` columns. If the table is empty, confirm that ShadowTraffic is running and has completed its seeding stage.
+
+Rather than modifying the application to publish to Kafka directly (dual-write risk), we use the **Debezium PostgreSQL connector running inside Kafka Connect** to tail the database's write-ahead log (WAL) and capture every insert and update from the `merchant` table without touching application code. Debezium streams those changes through Kafka Connect into the `pub.ref.merchant.state.v1` Kafka topic — a compacted topic that retains only the latest value per `merchant_id` key, making it equivalent to a continuously updated key-value store. Each record carries the fields `merchant_id`, `name`, `country`, `city`, `category_name` and `status`.
+
+### What is Kafka Connect
+
+![](./images/kafka-connect.png)
+
+Kafka Connect is a framework for scalable and reliable data streaming between Kafka and other systems. It uses connector plugins — each connector handles the specifics of reading from or writing to a particular system. Before setting up any connectors, you can list the available connector plugins to confirm that the JDBC and Debezium connectors are installed:
+
+```
+curl -X "GET" "http://dataplatform:8083/connector-plugins" | jq
+```
+
+> **What you should see:** A JSON array of connector plugin objects. Look for entries containing `JdbcSourceConnector` and `PostgresConnector` — these are the connectors used in this section.
+
+You can also use the Kafka Connect UI on <http://dataplatform:28103> to view the available connector plugins as well as start a connector and view it once it is running.
+
+### Using the Debezium PostgreSQL connector 
+
+Register the Debezium Kafka Connect connector by running [this script](./scripts/kafka-connect/start-cdc-merchant.sh):
+
+```bash
+scripts/kafka-connect/start-cdc-merchant.sh
+```
+
+The connector configuration does several things worth noting:
+
+- **`table.include.list: public.merchant`** — scopes the connector to only the `merchant` table so unrelated tables in the same database are ignored.
+- **`plugin.name: pgoutput`** — uses PostgreSQL's built-in logical replication output plugin, which requires no extra installation.
+- **`topic.creation.default.cleanup.policy: compact`** — tells Kafka to retain only the latest record per key, so the topic always reflects current merchant state rather than accumulating every historical change.
+- **`transforms: unwrap, extractKey, dropPrefix`** — three chained Single Message Transforms (SMTs) applied to every event in order:
+  1. **`unwrap` (`ExtractNewRecordState`)** — Debezium wraps each change in an envelope containing `before`, `after`, `op` (operation), and metadata fields. This SMT strips the envelope and passes through only the `after` value — the current row state — which is all downstream consumers need.
+  2. **`extractKey` (`ExtractField$Key`)** — by default the Kafka message key is the full primary-key struct `{merchant_id: "merchant-36"}`. This SMT extracts just the `merchant_id` string so the key is a plain `merchant-36` — easier to use in stream-table joins.
+  3. **`dropPrefix` (`RegexRouter`)** — Debezium names topics `<prefix>.<schema>.<table>`, which here would be `ref.public.merchant`. The regex router renames it to `pub.ref.merchant.state.v1` to match the naming convention used across the rest of the platform.
+
+Verify the connector registered successfully and data is arriving in the Kafka topic:
+
+```bash
+docker exec -ti kcat kcat -b kafka-1:19092 -t pub.ref.merchant.state.v1 -r http://schema-registry-1:8081 -s key=s -s value=avro -f '%k: %s\n' -q
+```
+
+and you will see the avro data formatted as JSON:
+
+```bash
+merchant-187: {"merchant_id": "merchant-187", "name": {"string": "Christiansen, Wisoky and Weber"}, "country": {"string": "US"}, "city": {"string": "New Latashiabury"}, "category_name": {"string": "Books"}, "status": {"string": "ACTIVE"}}
+merchant-189: {"merchant_id": "merchant-189", "name": {"string": "Effertz Group"}, "country": {"string": "US"}, "city": {"string": "Metzville"}, "category_name": {"string": "Books, Electronics & Games"}, "status": {"string": "ACTIVE"}}
+merchant-191: {"merchant_id": "merchant-191", "name": {"string": "Will, Braun and Gaylord"}, "country": {"string": "US"}, "city": {"string": "Adolfoport"}, "category_name": {"string": "Shoes"}, "status": {"string": "ACTIVE"}}
+merchant-193: {"merchant_id": "merchant-193", "name": {"string": "MacGyver, Cassin and Johnson"}, "country": {"string": "US"}, "city": {"string": "Hyattchester"}, "category_name": {"string": "Shoes"}, "status": {"string": "ACTIVE"}}
+merchant-195: {"merchant_id": "merchant-195", "name": {"string": "Bechtelar Group"}, "country": {"string": "US"}, "city": {"string": "Kareemstad"}, "category_name": {"string": "Beauty & Jewelry"}, "status": {"string": "ACTIVE"}}
+merchant-198: {"merchant_id": "merchant-198", "name": {"string": "Brakus-Schowalter"}, "country": {"string": "US"}, "city": {"string": "New Laurie"}, "category_name": {"string": "Electronics"}, "status": {"string": "ACTIVE"}}
+```
+
+> **What you should see:** Merchant records keyed by plain `merchant_id` strings (e.g. `merchant-187`), with a flat JSON or Avro value containing the current row fields. If the topic is empty, confirm that the `merchant` table in PostgreSQL has rows and that the connector status is `RUNNING` in Kafka Connect.
+
+## 04 - CardHolder Application (OLTP)
+
+**Goal:** Understand the structure of the source OLTP database that the `lhbank-cardholder` Spring Boot service writes to. This gives you a baseline understanding of what data will later be streamed into Kafka.
+
+The `lhbank-cardholder` service stores its data in a PostgreSQL database called `customer_db`. Before "stream-enabling" this data, it helps to inspect the table structure directly. Run the following commands to explore the database schema and sample data:
+
+List all tables in the `customer_db` database:
+
+```bash
+docker exec -ti postgresql psql -d customer_db -U customer -c "\dt"
+```
+
+> **What you should see:** A list of tables including `person`, `address`, `country`, `card`, and `outbox`. The `outbox` table is the key table used by the transactional outbox pattern (covered later in section 05). The other tables are part of the 3rd normal form data model of the CardHolder application.
+
+Lets preview part of the `person` and `address` tables:
+
+```bash
+docker exec -ti postgresql psql -d customer_db -U customer -c "SELECT * FROM person LIMIT 10;"
+```
+
+```bash
+docker exec -ti postgresql psql -d customer_db -U customer -c "SELECT * FROM address LIMIT 10;"
+```
+
+To explore the table schemas interactively, connect to the `psql` shell:
+
+```bash
+docker exec -ti postgresql psql -d customer_db -U customer
+```
+
+Once connected, describe the `person` table to understand its columns:
+
+```sql
+\d person
+```
+
+Describe the `address` table:
+
+```sql
+\d address
+```
+
+If you perform a `SELECT COUNT(*) FROM person` a few times with some time inbetween you should see the count increase due to the new cardHolders created by the simulator. 
+
+> **What just happened?** You have confirmed that the source OLTP database is running and contains cardholder data. The `person` and `address` tables hold the core business data, while the `outbox` table (visible in `\dt`) will be used by Debezium in section 05 to propagate changes to Kafka without dual writes.
+
+## 05 - Stream Enabling the CardHolder Application
+
+**Goal:** Capture cardholder data changes from PostgreSQL into Kafka topics using Kafka Connect. 
+
+Stream-enabling a OLTP application is a common integration challenge, and the right approach depends on how much control you have over the application code. This section covers two solutions:
+
+**1. Log-based CDC with Debezium**
+The same technique used for merchant data. Debezium tails the PostgreSQL write-ahead log (WAL) and captures every row-level change from the cardholder tables — no application changes required. This works well when the source tables have a stable schema and you want to capture all change types (inserts, updates, deletes) with minimal latency.
+
+**2. Transactional Outbox Pattern**
+A more robust approach for applications you own and can modify. The `lhbank-cardholder` service writes a business event into an `outbox` table in the same database transaction as the business write. Debezium then captures only the outbox rows and routes them to Kafka. This guarantees exactly-once delivery semantics, gives full control over the event payload and schema, and avoids exposing internal table structure to consumers.
+
+Both approaches use the Debezium PostgreSQL connector running inside Kafka Connect — the difference is in *what* Debezium reads and *how* the event payload is shaped.
+
+### Log-based CDC using Debezium and Kafka Connect
+
+Log-based CDC reads directly from the PostgreSQL write-ahead log (WAL) via the `pgoutput` plugin. This captures all changes (inserts, updates, and deletes) with near-zero latency and no impact on the source database's query load.
+
+![](./images/log-based-cdc.png)
+
+Register the Debezium PostgreSQL connector for log-based CDC. Unlike the JDBC connector above, this connector tails the WAL and does not need a watermark column — it captures every row-level change in real time:
+
+`start-cdc-cardholder.sh`
+```
+curl -X PUT \
+  "http://$DATAPLATFORM_IP:8083/connectors/customer.dbzsrc.log-based-cdc/config" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "tasks.max": "1",
+  "slot.name":"dbzlogbased2",
+  "database.server.name": "postgresql",
+  "database.port": "5432",
+  "database.user": "customer",
+  "database.password": "abc123!",  
+  "database.dbname": "customer_db",
+  "schema.include.list": "public",
+  "table.include.list": "public.person, public.address, public.card, public.country",
+  "plugin.name": "pgoutput",
+  "topic.prefix": "customer",  
+  "tombstones.on.delete": "false",
+  "database.hostname": "postgresql",
+  "transforms":"unwrap,dropPrefix",
+  "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+  "transforms.dropPrefix.type": "org.apache.kafka.connect.transforms.RegexRouter",  
+  "transforms.dropPrefix.regex": "customer.public.(.*)",  
+  "transforms.dropPrefix.replacement": "priv.$1.dbz.v1",
+  "topic.creation.default.replication.factor": 3,
+  "topic.creation.default.partitions": 2,
+  "topic.creation.default.cleanup.policy": "compact"
+}'
+```
+
+Verify that person change events are flowing from the WAL:
+
+```
+kcat -b dataplatform -t priv.person.dbz.v1 -r http://dataplatform:8081 -s value=avro -o end -q
+```
+
+> **What you should see:** One Kafka topic per source table — `priv.person.dbz.v1`, `priv.address.dbz.v1`, `priv.card.dbz.v1`, `priv.country.dbz.v1`. This is third normal form (3NF) reflected directly in the topic design: the topics mirror the relational table structure one-to-one. The implication is that any schema change in the database — a column rename, a new field, a type change — immediately affects the corresponding topic. That tight coupling to the source schema is exactly why these topics are **private** (`priv.` prefix): they are internal CDC artefacts, not stable contracts for external consumers. Downstream teams should consume from the enriched or outbox-derived topics (`pub.*`), which have controlled, versioned schemas.
+
+### Transactional Outbox Pattern using Debezium and Kafka Connect
+
+The transactional outbox pattern is used by the `lhbank-cardholder` Spring Boot service. When a cardholder is onboarded, the service writes to both the business tables and an `outbox` table in the same database transaction — guaranteeing atomicity without a distributed transaction. Debezium then captures the outbox inserts via CDC and routes events to Kafka topics based on the `event_type` column using the `EventRouter` Single Message Transform. This is the recommended approach for the main cardholder integration.
+
+![](./images/transactional-outbox.png)
+
+First start the `lhbank-cardholder` service (or use the Docker Compose override), then register the connector:
+
+`start-outbox-cardholder.sh`
+```
+curl -X PUT \
+  "http://$DATAPLATFORM_IP:8083/connectors/cardHolder.dbzsrc.outbox/config" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "tasks.max": "1",
+
+  "database.server.name": "postgresql",
+  "database.port": "5432",
+  "database.user": "customer",
+  "database.password": "abc123!",
+  "database.dbname": "customer_db",
+  "topic.prefix": "cardHolder",
+  "schema.include.list": "public",
+  "table.include.list": "public.outbox",
+  "plugin.name": "pgoutput",
+  "publication.name":"chdebezium",
+  "slot.name":"chdebezium",
+  "tombstones.on.delete": "false",
+  "database.hostname": "postgresql",
+  "transforms": "outbox",
+  "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+  "transforms.outbox.table.field.event.id": "id",
+  "transforms.outbox.table.field.event.key": "event_key",
+  "transforms.outbox.table.field.event.payload": "payload_avro",
+  "transforms.outbox.route.by.field": "event_type",
+  "transforms.outbox.route.topic.replacement": "pub.cus.${routedByValue}.state.v1",
+  "value.converter": "io.debezium.converters.BinaryDataConverter",
+  "topic.creation.default.replication.factor": 3,
+  "topic.creation.default.partitions": 8,
+  "key.converter": "org.apache.kafka.connect.storage.StringConverter"
+}'
+```
+
+Confirm that cardholder events are being routed to the correct topic:
+
+```
+kcat -b dataplatform -t pub.cus.cardHolder.state.v1 -r http://dataplatform:8081 -s value=avro -o end -q
+```
+
+> **What just happened?** The `EventRouter` SMT reads the `event_type` column from each outbox row and routes the payload to the topic `pub.cus.${routedByValue}.state.v1`. For cardholder events the topic becomes `pub.cus.cardHolder.state.v1`. The Avro payload stored in `payload_avro` is passed through as the Kafka message value, preserving the full schema.
+
+### Why not sending directly to Kafka?
+
+Writing to both the database and Kafka directly (dual write) is not safe: if the Kafka write succeeds but the database write fails (or vice versa), the two systems become inconsistent. The transactional outbox pattern avoids this by making the outbox write part of the same database transaction as the business write.
+
+![](./images/beaware-of-dual-write.png)
+
+### Virtual Outbox using View and database object-relational/json features
+
+An alternative to a physical outbox table is a virtual outbox implemented as a database view that projects the business tables into the same event structure. This avoids the overhead of writing to an extra table but will require the Polling-based CDC approach with a watermark column and increased latency.
+
+![](./images/virtual-outbox.png)
+
+## 06 - Provide Geonames data (optional)
+
+**Goal:** Load city geolocation data into Kafka so that transaction city names can be enriched with latitude/longitude coordinates in section 08.
+
+This section loads the [GeoNames](https://www.geonames.org/) `cities1000.txt` dataset — a tab-separated file of all cities with a population over 1,000 — into the `pub.ref.geonames.state.v1` Kafka topic. The Flink SQL geo enrichment step in section 08 reads this topic to attach latitude/longitude coordinates to transaction city names.
+
+The notebook for this step is `jupyter/10-cities-for-geo-location.ipynb`.
+
+First upload `data/cities1000.txt` to `s3a://landing-bucket/geonames` in local RustFS, then run the following Spark session to read the file and write it to Kafka. Open Jupyter at <http://dataplatform:28888> and create a notebook with the **Python 3.12.8** kernel.
+
+Start a Spark session configured to talk to both RustFS (for reading the GeoNames file) and the Iceberg REST catalog:
+
+```python
+import os
+
+# get the accessKey and secretKey from Environment
+accessKey = os.environ["AWS_ACCESS_KEY_ID"]
+secretKey = os.environ["AWS_SECRET_ACCESS_KEY"]
+
+from pyspark.sql import SparkSession
+
+spark = (
+    SparkSession.builder.appName("Jupyter")
+    .master("spark://spark-master:7077")
+    .config(
+        "spark.jars.packages",
+        "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
+        "org.apache.iceberg:iceberg-aws-bundle:1.10.1,"
+        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
+    )
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+    .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
+    .config("spark.hadoop.fs.s3a.path.style.access", "true")
+    .config("spark.hadoop.fs.s3a.access.key", accessKey)
+    .config("spark.hadoop.fs.s3a.secret.key", secretKey)
+    .config(
+        "spark.hadoop.fs.s3a.aws.credentials.provider",
+        "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+    )
+    # ==== Iceberg catalog (Hive Metastore Iceberg REST Catalog) ===
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest", "org.apache.iceberg.spark.SparkCatalog"
+    )
+    .config("spark.sql.catalog.hive_iceberg_rest.type", "rest")
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.uri", "http://hive-metastore:9084/iceberg"
+    )
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.warehouse",
+        "s3a://admin-bucket/iceberg/warehouse",
+    )
+    .config(
+        "spark.sql.catalog.hive_iceberg_rest.io-impl",
+        "org.apache.iceberg.aws.s3.S3FileIO",
+    )
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.endpoint", "http://rustfs-1:9000")
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.access-key-id", accessKey)
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.secret-access-key", secretKey)
+    .config("spark.sql.catalog.hive_iceberg_rest.s3.path-style-access", "true")
+    # use "hive_iceberg" as the default catalog
+    .config("spark.sql.defaultCatalog", "hive_iceberg_rest")
+    .config(
+        "spark.sql.extensions",
+        "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+    )
+    .getOrCreate()
+)
+```
+
+Read the GeoNames TSV file from RustFS, applying the full 19-column schema:
+
+```python
+from pyspark.sql.types import *
+
+schema = StructType(
+    [
+        StructField("geonameid", LongType()),
+        StructField("name", StringType()),
+        StructField("asciiname", StringType()),
+        StructField("alternatenames", StringType()),
+        StructField("latitude", DoubleType()),
+        StructField("longitude", DoubleType()),
+        StructField("feature_class", StringType()),
+        StructField("feature_code", StringType()),
+        StructField("country_code", StringType()),
+        StructField("cc2", StringType()),
+        StructField("admin1_code", StringType()),
+        StructField("admin2_code", StringType()),
+        StructField("admin3_code", StringType()),
+        StructField("admin4_code", StringType()),
+        StructField("population", LongType()),
+        StructField("elevation", IntegerType()),
+        StructField("dem", IntegerType()),
+        StructField("timezone", StringType()),
+        StructField("modification_date", StringType()),
+    ]
+)
+
+df = (
+    spark.read.option("sep", "\t")
+    .schema(schema)
+    .csv("s3a://landing-bucket/geonames/cities1000.txt")
+)
+```
+
+Now project down to just the fields needed for geo enrichment (`name`, `latitude`, `longitude`) and write them as JSON messages to the `pub.ref.geonames.state.v1` Kafka topic. The city name becomes the Kafka message key (used for partitioning and table lookups), and the JSON struct becomes the value:
+
+```python
+from pyspark.sql.functions import to_json, struct, col
+
+# Select only the required fields and convert to JSON
+kafka_df = df.select(
+    col("name").alias("key"),  # Kafka message key
+    to_json(struct(col("name"), col("latitude"), col("longitude"))).alias(
+        "value"
+    ),  # Kafka expects a column named 'value' for the message payload
+)
+
+# Write to Kafka
+kafka_df.write.format("kafka").option(
+    "kafka.bootstrap.servers", "kafka-1:19092"
+).option("topic", "pub.ref.geonames.state.v1").save()
+```
+
+> **What just happened?** Spark read roughly 150,000 city records from the GeoNames file in RustFS and wrote each one as a JSON message to Kafka. The `pub.ref.geonames.state.v1` topic now acts as a reference lookup table that Flink SQL can join against in the geo enrichment step in section 08.
+
+## 07 - Exploring Kafka Streams using Flink SQL with the Hive Metastore Catalog
 
 [Apache Flink](https://flink.apache.org/) is an open-source distributed stream-processing framework designed for stateful computations over bounded and unbounded data streams. Unlike batch systems that process a fixed dataset and exit, Flink runs continuously — ingesting events as they arrive, maintaining state across them, and emitting results with low latency. It is fault-tolerant (via distributed checkpointing), horizontally scalable, and capable of exactly-once processing semantics.
 
@@ -436,400 +829,7 @@ This is due to the configuration of the Hive Metastore catalog. Flink ships with
 | **Hive Metastore** | Permanent — stored in the Metastore DB | Yes | Production pipelines |
 | **JDBC** | Permanent — but read-only view of an existing DB | No | Querying existing tables |
 
-
-Querying the raw transaction stream already reveals patterns, but a `merchant_id` alone is not enough to flag fraud or explain it. The next sections bring in the reference data — merchants and cardholders — that the detection pipeline needs to make decisions and produce actionable alerts.
-
-## 03 - Merchant Data
-
-**Goal:** Stream merchant reference data from a legacy application database into Kafka using Debezium log-based CDC, and understand why that data is needed in two places in the fraud detection pipeline: blocking transactions at suspicious merchants and enriching flagged transactions with human-readable context.
-
-Merchant data drives two distinct steps in this pipeline, and both require the same reference dataset to be continuously available as a Kafka topic:
-
-**1. Blocking — merchant blacklist join (section 07)**
-Fraud operations teams maintain lists of merchants associated with fraudulent activity. Every incoming transaction is checked against this blacklist via a real-time stream-table join on `merchant_id` — a match flags the transaction immediately. The merchant reference data provides the stable set of IDs that blacklist entries refer to.
-
-**2. Enrichment — adding context to flagged transactions (section 07)**
-A raw transaction carries only a `merchant_id` foreign key. Analysts need human-readable context — merchant name, city, country, and category — to act on a flag without manual lookup. Joining each transaction against the merchant reference table adds exactly that.
-
-Merchant data lives in a legacy application's PostgreSQL database. Before stream-enabling it, confirm that the data is there by querying the table directly:
-
-```bash
-docker exec -ti postgresql psql -U postgres -c "SELECT * FROM merchant LIMIT 10;"
-```
-
-and you should see data similar to shown below
-
-```bash
- merchant_id |              name               | country |       city       |     category_name      | status
--------------+---------------------------------+---------+------------------+------------------------+--------
- merchant-0  | Mraz LLC                        | US      | New Johnnieview  | Baby, Beauty & Jewelry | ACTIVE
- merchant-1  | Altenwerth LLC                  | US      | Earleville       | Electronics            | ACTIVE
- merchant-2  | MacGyver-Lowe                   | US      | Leonardoborough  | Jewelry & Tools        | ACTIVE
- merchant-3  | Hartmann and Sons               | US      | North German     | Music                  | ACTIVE
- merchant-4  | Nikolaus, Krajcik and Dickinson | US      | Patrickstad      | Music                  | ACTIVE
- merchant-5  | Kessler, Corkery and Klocko     | US      | West Malcolmstad | Movies                 | ACTIVE
- merchant-6  | Bernhard-Mayert                 | US      | Tishahaven       | Computers              | ACTIVE
- merchant-7  | Cremin and Sons                 | US      | New Rodrigoland  | Beauty & Grocery       | ACTIVE
- merchant-8  | Gislason-Crona                  | US      | Hannahfort       | Games & Jewelry        | ACTIVE
- merchant-9  | Legros, Tremblay and Marks      | US      | Yukburgh         | Beauty & Books         | ACTIVE
-(10 rows)
-```
-
-> **What you should see:** Rows with `merchant_id`, `name`, `country`, `city`, `category_name`, and `status` columns. If the table is empty, confirm that ShadowTraffic is running and has completed its seeding stage.
-
-Rather than modifying the application to publish to Kafka directly (dual-write risk), we use the **Debezium PostgreSQL connector running inside Kafka Connect** to tail the database's write-ahead log (WAL) and capture every insert and update from the `merchant` table without touching application code. Debezium streams those changes through Kafka Connect into the `pub.ref.merchant.state.v1` Kafka topic — a compacted topic that retains only the latest value per `merchant_id` key, making it equivalent to a continuously updated key-value store. Each record carries the fields `merchant_id`, `name`, `country`, `city`, `category_name` and `status`.
-
-### What is Kafka Connect
-
-![](./images/kafka-connect.png)
-
-Kafka Connect is a framework for scalable and reliable data streaming between Kafka and other systems. It uses connector plugins — each connector handles the specifics of reading from or writing to a particular system. Before setting up any connectors, you can list the available connector plugins to confirm that the JDBC and Debezium connectors are installed:
-
-```
-curl -X "GET" "http://dataplatform:8083/connector-plugins" | jq
-```
-
-> **What you should see:** A JSON array of connector plugin objects. Look for entries containing `JdbcSourceConnector` and `PostgresConnector` — these are the connectors used in this section.
-
-You can also use the Kafka Connect UI on <http://dataplatform:28103> to view the available connector plugins as well as start a connector and view it once it is running.
-
-### Using the Debezium PostgreSQL connector 
-
-Register the Debezium Kafka Connect connector by running [this script](./scripts/kafka-connect/start-cdc-merchant.sh):
-
-```bash
-scripts/kafka-connect/start-cdc-merchant.sh
-```
-
-The connector configuration does several things worth noting:
-
-- **`table.include.list: public.merchant`** — scopes the connector to only the `merchant` table so unrelated tables in the same database are ignored.
-- **`plugin.name: pgoutput`** — uses PostgreSQL's built-in logical replication output plugin, which requires no extra installation.
-- **`topic.creation.default.cleanup.policy: compact`** — tells Kafka to retain only the latest record per key, so the topic always reflects current merchant state rather than accumulating every historical change.
-- **`transforms: unwrap, extractKey, dropPrefix`** — three chained Single Message Transforms (SMTs) applied to every event in order:
-  1. **`unwrap` (`ExtractNewRecordState`)** — Debezium wraps each change in an envelope containing `before`, `after`, `op` (operation), and metadata fields. This SMT strips the envelope and passes through only the `after` value — the current row state — which is all downstream consumers need.
-  2. **`extractKey` (`ExtractField$Key`)** — by default the Kafka message key is the full primary-key struct `{merchant_id: "merchant-36"}`. This SMT extracts just the `merchant_id` string so the key is a plain `merchant-36` — easier to use in stream-table joins.
-  3. **`dropPrefix` (`RegexRouter`)** — Debezium names topics `<prefix>.<schema>.<table>`, which here would be `ref.public.merchant`. The regex router renames it to `pub.ref.merchant.state.v1` to match the naming convention used across the rest of the platform.
-
-Verify the connector registered successfully and data is arriving in the Kafka topic:
-
-```bash
-docker exec -ti kcat kcat -b kafka-1:19092 -t pub.ref.merchant.state.v1 -r http://schema-registry-1:8081 -s key=s -s value=avro -f '%k: %s\n' -q
-```
-
-and you will see the avro data formatted as JSON:
-
-```bash
-merchant-187: {"merchant_id": "merchant-187", "name": {"string": "Christiansen, Wisoky and Weber"}, "country": {"string": "US"}, "city": {"string": "New Latashiabury"}, "category_name": {"string": "Books"}, "status": {"string": "ACTIVE"}}
-merchant-189: {"merchant_id": "merchant-189", "name": {"string": "Effertz Group"}, "country": {"string": "US"}, "city": {"string": "Metzville"}, "category_name": {"string": "Books, Electronics & Games"}, "status": {"string": "ACTIVE"}}
-merchant-191: {"merchant_id": "merchant-191", "name": {"string": "Will, Braun and Gaylord"}, "country": {"string": "US"}, "city": {"string": "Adolfoport"}, "category_name": {"string": "Shoes"}, "status": {"string": "ACTIVE"}}
-merchant-193: {"merchant_id": "merchant-193", "name": {"string": "MacGyver, Cassin and Johnson"}, "country": {"string": "US"}, "city": {"string": "Hyattchester"}, "category_name": {"string": "Shoes"}, "status": {"string": "ACTIVE"}}
-merchant-195: {"merchant_id": "merchant-195", "name": {"string": "Bechtelar Group"}, "country": {"string": "US"}, "city": {"string": "Kareemstad"}, "category_name": {"string": "Beauty & Jewelry"}, "status": {"string": "ACTIVE"}}
-merchant-198: {"merchant_id": "merchant-198", "name": {"string": "Brakus-Schowalter"}, "country": {"string": "US"}, "city": {"string": "New Laurie"}, "category_name": {"string": "Electronics"}, "status": {"string": "ACTIVE"}}
-```
-
-> **What you should see:** Merchant records keyed by plain `merchant_id` strings (e.g. `merchant-187`), with a flat JSON or Avro value containing the current row fields. If the topic is empty, confirm that the `merchant` table in PostgreSQL has rows and that the connector status is `RUNNING` in Kafka Connect.
-
-## 04 - CardHolder Application (OLTP)
-
-**Goal:** Understand the structure of the source OLTP database that the `lhbank-cardholder` Spring Boot service writes to. This gives you a baseline understanding of what data will later be streamed into Kafka.
-
-The `lhbank-cardholder` service stores its data in a PostgreSQL database called `customer_db`. Before "stream-enabling" this data, it helps to inspect the table structure directly. Run the following commands to explore the database schema and sample data:
-
-List all tables in the `customer_db` database:
-
-```bash
-docker exec -ti postgresql psql -d customer_db -U customer -c "\dt"
-```
-
-> **What you should see:** A list of tables including `person`, `address`, `country`, `card`, and `outbox`. The `outbox` table is the key table used by the transactional outbox pattern (covered later in section 05). The other tables are part of the 3rd normal form data model of the CardHolder application.
-
-Lets preview part of the `person` and `address` tables:
-
-```bash
-docker exec -ti postgresql psql -d customer_db -U customer -c "SELECT * FROM person LIMIT 10;"
-```
-
-```bash
-docker exec -ti postgresql psql -d customer_db -U customer -c "SELECT * FROM address LIMIT 10;"
-```
-
-To explore the table schemas interactively, connect to the `psql` shell:
-
-```bash
-docker exec -ti postgresql psql -d customer_db -U customer
-```
-
-Once connected, describe the `person` table to understand its columns:
-
-```sql
-\d person
-```
-
-Describe the `address` table:
-
-```sql
-\d address
-```
-
-If you perform a `SELECT COUNT(*) FROM person` a few times with some time inbetween you should see the count increase due to the new cardHolders created by the simulator. 
-
-> **What just happened?** You have confirmed that the source OLTP database is running and contains cardholder data. The `person` and `address` tables hold the core business data, while the `outbox` table (visible in `\dt`) will be used by Debezium in section 05 to propagate changes to Kafka without dual writes.
-
-## 05 - Stream Enabling the CardHolder Application
-
-**Goal:** Capture cardholder data changes from PostgreSQL into Kafka topics using Kafka Connect. 
-
-Stream-enabling a OLTP application is a common integration challenge, and the right approach depends on how much control you have over the application code. This section covers two solutions:
-
-**1. Log-based CDC with Debezium**
-The same technique used for merchant data. Debezium tails the PostgreSQL write-ahead log (WAL) and captures every row-level change from the cardholder tables — no application changes required. This works well when the source tables have a stable schema and you want to capture all change types (inserts, updates, deletes) with minimal latency.
-
-**2. Transactional Outbox Pattern**
-A more robust approach for applications you own and can modify. The `lhbank-cardholder` service writes a business event into an `outbox` table in the same database transaction as the business write. Debezium then captures only the outbox rows and routes them to Kafka. This guarantees exactly-once delivery semantics, gives full control over the event payload and schema, and avoids exposing internal table structure to consumers.
-
-Both approaches use the Debezium PostgreSQL connector running inside Kafka Connect — the difference is in *what* Debezium reads and *how* the event payload is shaped.
-
-### Log-based CDC using Debezium and Kafka Connect
-
-Log-based CDC reads directly from the PostgreSQL write-ahead log (WAL) via the `pgoutput` plugin. This captures all changes (inserts, updates, and deletes) with near-zero latency and no impact on the source database's query load.
-
-![](./images/log-based-cdc.png)
-
-Register the Debezium PostgreSQL connector for log-based CDC. Unlike the JDBC connector above, this connector tails the WAL and does not need a watermark column — it captures every row-level change in real time:
-
-`start-cdc-cardholder.sh`
-```
-curl -X PUT \
-  "http://$DATAPLATFORM_IP:8083/connectors/customer.dbzsrc.log-based-cdc/config" \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -d '{
-  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-  "tasks.max": "1",
-  "slot.name":"dbzlogbased2",
-  "database.server.name": "postgresql",
-  "database.port": "5432",
-  "database.user": "customer",
-  "database.password": "abc123!",  
-  "database.dbname": "customer_db",
-  "schema.include.list": "public",
-  "table.include.list": "public.person, public.address, public.card, public.country",
-  "plugin.name": "pgoutput",
-  "topic.prefix": "customer",  
-  "tombstones.on.delete": "false",
-  "database.hostname": "postgresql",
-  "transforms":"unwrap,dropPrefix",
-  "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-  "transforms.dropPrefix.type": "org.apache.kafka.connect.transforms.RegexRouter",  
-  "transforms.dropPrefix.regex": "customer.public.(.*)",  
-  "transforms.dropPrefix.replacement": "priv.$1.dbz.v1",
-  "topic.creation.default.replication.factor": 3,
-  "topic.creation.default.partitions": 2,
-  "topic.creation.default.cleanup.policy": "compact"
-}'
-```
-
-Verify that person change events are flowing from the WAL:
-
-```
-kcat -b dataplatform -t priv.person.dbz.v1 -r http://dataplatform:8081 -s value=avro -o end -q
-```
-
-> **What you should see:** One Kafka topic per source table — `priv.person.dbz.v1`, `priv.address.dbz.v1`, `priv.card.dbz.v1`, `priv.country.dbz.v1`. This is third normal form (3NF) reflected directly in the topic design: the topics mirror the relational table structure one-to-one. The implication is that any schema change in the database — a column rename, a new field, a type change — immediately affects the corresponding topic. That tight coupling to the source schema is exactly why these topics are **private** (`priv.` prefix): they are internal CDC artefacts, not stable contracts for external consumers. Downstream teams should consume from the enriched or outbox-derived topics (`pub.*`), which have controlled, versioned schemas.
-
-### Transactional Outbox Pattern using Debezium and Kafka Connect
-
-The transactional outbox pattern is used by the `lhbank-cardholder` Spring Boot service. When a cardholder is onboarded, the service writes to both the business tables and an `outbox` table in the same database transaction — guaranteeing atomicity without a distributed transaction. Debezium then captures the outbox inserts via CDC and routes events to Kafka topics based on the `event_type` column using the `EventRouter` Single Message Transform. This is the recommended approach for the main cardholder integration.
-
-![](./images/transactional-outbox.png)
-
-First start the `lhbank-cardholder` service (or use the Docker Compose override), then register the connector:
-
-`start-outbox-cardholder.sh`
-```
-curl -X PUT \
-  "http://$DATAPLATFORM_IP:8083/connectors/cardHolder.dbzsrc.outbox/config" \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -d '{
-  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-  "tasks.max": "1",
-
-  "database.server.name": "postgresql",
-  "database.port": "5432",
-  "database.user": "customer",
-  "database.password": "abc123!",
-  "database.dbname": "customer_db",
-  "topic.prefix": "cardHolder",
-  "schema.include.list": "public",
-  "table.include.list": "public.outbox",
-  "plugin.name": "pgoutput",
-  "publication.name":"chdebezium",
-  "slot.name":"chdebezium",
-  "tombstones.on.delete": "false",
-  "database.hostname": "postgresql",
-  "transforms": "outbox",
-  "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
-  "transforms.outbox.table.field.event.id": "id",
-  "transforms.outbox.table.field.event.key": "event_key",
-  "transforms.outbox.table.field.event.payload": "payload_avro",
-  "transforms.outbox.route.by.field": "event_type",
-  "transforms.outbox.route.topic.replacement": "pub.cus.${routedByValue}.state.v1",
-  "value.converter": "io.debezium.converters.BinaryDataConverter",
-  "topic.creation.default.replication.factor": 3,
-  "topic.creation.default.partitions": 8,
-  "key.converter": "org.apache.kafka.connect.storage.StringConverter"
-}'
-```
-
-Confirm that cardholder events are being routed to the correct topic:
-
-```
-kcat -b dataplatform -t pub.cus.cardHolder.state.v1 -r http://dataplatform:8081 -s value=avro -o end -q
-```
-
-> **What just happened?** The `EventRouter` SMT reads the `event_type` column from each outbox row and routes the payload to the topic `pub.cus.${routedByValue}.state.v1`. For cardholder events the topic becomes `pub.cus.cardHolder.state.v1`. The Avro payload stored in `payload_avro` is passed through as the Kafka message value, preserving the full schema.
-
-### Why not sending directly to Kafka?
-
-Writing to both the database and Kafka directly (dual write) is not safe: if the Kafka write succeeds but the database write fails (or vice versa), the two systems become inconsistent. The transactional outbox pattern avoids this by making the outbox write part of the same database transaction as the business write.
-
-![](./images/beaware-of-dual-write.png)
-
-### Virtual Outbox using View and database object-relational/json features
-
-An alternative to a physical outbox table is a virtual outbox implemented as a database view that projects the business tables into the same event structure. This avoids the overhead of writing to an extra table but will require the Polling-based CDC approach with a watermark column and increased latency.
-
-![](./images/virtual-outbox.png)
-
-## 06 - Provide Geonames data (optional)
-
-**Goal:** Load city geolocation data into Kafka so that transaction city names can be enriched with latitude/longitude coordinates in section 07.
-
-This section loads the [GeoNames](https://www.geonames.org/) `cities1000.txt` dataset — a tab-separated file of all cities with a population over 1,000 — into the `pub.ref.geonames.state.v1` Kafka topic. The Flink SQL geo enrichment step in section 07 reads this topic to attach latitude/longitude coordinates to transaction city names.
-
-The notebook for this step is `jupyter/10-cities-for-geo-location.ipynb`.
-
-First upload `data/cities1000.txt` to `s3a://landing-bucket/geonames` in local RustFS, then run the following Spark session to read the file and write it to Kafka. Open Jupyter at <http://dataplatform:28888> and create a notebook with the **Python 3.12.8** kernel.
-
-Start a Spark session configured to talk to both RustFS (for reading the GeoNames file) and the Iceberg REST catalog:
-
-```python
-import os
-
-# get the accessKey and secretKey from Environment
-accessKey = os.environ["AWS_ACCESS_KEY_ID"]
-secretKey = os.environ["AWS_SECRET_ACCESS_KEY"]
-
-from pyspark.sql import SparkSession
-
-spark = (
-    SparkSession.builder.appName("Jupyter")
-    .master("spark://spark-master:7077")
-    .config(
-        "spark.jars.packages",
-        "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,"
-        "org.apache.iceberg:iceberg-aws-bundle:1.10.1,"
-        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
-    )
-    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-    .config("spark.hadoop.fs.s3a.endpoint", "http://rustfs-1:9000")
-    .config("spark.hadoop.fs.s3a.path.style.access", "true")
-    .config("spark.hadoop.fs.s3a.access.key", accessKey)
-    .config("spark.hadoop.fs.s3a.secret.key", secretKey)
-    .config(
-        "spark.hadoop.fs.s3a.aws.credentials.provider",
-        "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
-    )
-    # ==== Iceberg catalog (Hive Metastore Iceberg REST Catalog) ===
-    .config(
-        "spark.sql.catalog.hive_iceberg_rest", "org.apache.iceberg.spark.SparkCatalog"
-    )
-    .config("spark.sql.catalog.hive_iceberg_rest.type", "rest")
-    .config(
-        "spark.sql.catalog.hive_iceberg_rest.uri", "http://hive-metastore:9084/iceberg"
-    )
-    .config(
-        "spark.sql.catalog.hive_iceberg_rest.warehouse",
-        "s3a://admin-bucket/iceberg/warehouse",
-    )
-    .config(
-        "spark.sql.catalog.hive_iceberg_rest.io-impl",
-        "org.apache.iceberg.aws.s3.S3FileIO",
-    )
-    .config("spark.sql.catalog.hive_iceberg_rest.s3.endpoint", "http://rustfs-1:9000")
-    .config("spark.sql.catalog.hive_iceberg_rest.s3.access-key-id", accessKey)
-    .config("spark.sql.catalog.hive_iceberg_rest.s3.secret-access-key", secretKey)
-    .config("spark.sql.catalog.hive_iceberg_rest.s3.path-style-access", "true")
-    # use "hive_iceberg" as the default catalog
-    .config("spark.sql.defaultCatalog", "hive_iceberg_rest")
-    .config(
-        "spark.sql.extensions",
-        "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
-    )
-    .getOrCreate()
-)
-```
-
-Read the GeoNames TSV file from RustFS, applying the full 19-column schema:
-
-```python
-from pyspark.sql.types import *
-
-schema = StructType(
-    [
-        StructField("geonameid", LongType()),
-        StructField("name", StringType()),
-        StructField("asciiname", StringType()),
-        StructField("alternatenames", StringType()),
-        StructField("latitude", DoubleType()),
-        StructField("longitude", DoubleType()),
-        StructField("feature_class", StringType()),
-        StructField("feature_code", StringType()),
-        StructField("country_code", StringType()),
-        StructField("cc2", StringType()),
-        StructField("admin1_code", StringType()),
-        StructField("admin2_code", StringType()),
-        StructField("admin3_code", StringType()),
-        StructField("admin4_code", StringType()),
-        StructField("population", LongType()),
-        StructField("elevation", IntegerType()),
-        StructField("dem", IntegerType()),
-        StructField("timezone", StringType()),
-        StructField("modification_date", StringType()),
-    ]
-)
-
-df = (
-    spark.read.option("sep", "\t")
-    .schema(schema)
-    .csv("s3a://landing-bucket/geonames/cities1000.txt")
-)
-```
-
-Now project down to just the fields needed for geo enrichment (`name`, `latitude`, `longitude`) and write them as JSON messages to the `pub.ref.geonames.state.v1` Kafka topic. The city name becomes the Kafka message key (used for partitioning and table lookups), and the JSON struct becomes the value:
-
-```python
-from pyspark.sql.functions import to_json, struct, col
-
-# Select only the required fields and convert to JSON
-kafka_df = df.select(
-    col("name").alias("key"),  # Kafka message key
-    to_json(struct(col("name"), col("latitude"), col("longitude"))).alias(
-        "value"
-    ),  # Kafka expects a column named 'value' for the message payload
-)
-
-# Write to Kafka
-kafka_df.write.format("kafka").option(
-    "kafka.bootstrap.servers", "kafka-1:19092"
-).option("topic", "pub.ref.geonames.state.v1").save()
-```
-
-> **What just happened?** Spark read roughly 150,000 city records from the GeoNames file in RustFS and wrote each one as a JSON message to Kafka. The `pub.ref.geonames.state.v1` topic now acts as a reference lookup table that Flink SQL can join against in the geo enrichment step in section 07.
-
-## 07 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment
+## 08 - Fraud Detection - Blocked Merchant Flagging and Merchant Enrichment
 
 **Goal:** Build a multi-stage streaming fraud detection pipeline in FlinkSQL that progressively enriches and scores each transaction. By the end of this section, every transaction flowing through Kafka will carry a fraud flag and a reason code.
 
@@ -1014,7 +1014,7 @@ SELECT * FROM pay_transaction_flagged_t WHERE is_flagged = 1;
 
 > **What just happened?** Flink submitted a persistent streaming job that runs on the cluster independently of the SQL client session. Every new record on `priv.pay.transaction.delta.v1` is joined against the current blacklist state and the result is written to `priv.pay.transaction-flagged.delta.v1`. Because `ref_merchant_t` uses the upsert-kafka connector, Flink maintains an in-memory state of the latest value per merchant key — adding a merchant to the blacklist after the job starts immediately affects subsequent transactions.
 
-## 08 - Fraud Detection - Enrich with CardHolder Data
+## 09 - Fraud Detection - Enrich with CardHolder Data
 
 The blocked merchants join flags known-bad merchants. 
 
@@ -1243,7 +1243,7 @@ FROM pay_transaction_flagged2_t
 WHERE is_flagged > 0;
 ```
 
-## 09 - Fraud Detection - Advanced Fraud Detection Patterns
+## 10 - Fraud Detection - Advanced Fraud Detection Patterns
 
 This section adds a complementary fraud signal that does not require an external reference list — it derives suspicion entirely from patterns within the transaction stream itself using `MATCH_RECOGNIZE`.
 
@@ -1408,7 +1408,7 @@ WHERE is_flagged > 0;
 
 > **What you should see:** Transactions flagged with one or more reasons: `'blocked'` (merchant blocked), `'high-amount'` (amount exceeded cardholder's personal average), `'card-testing'` (large transaction preceded by a small probe on the same card), or any combination such as `'blocked,high-amount'`.
 
-## 10 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect
+## 11 - Write Kafka data as Iceberg tables to S3 Object Storage using Kafka Connect
 
 **Goal:** Persistently land all streaming data — raw transactions, flagged transactions, merchant reference data, and cardholder events — into durable Iceberg tables on object storage. This makes the data available for batch analytics with Spark and Trino even after the Kafka topic retention window has passed.
 
@@ -1518,7 +1518,7 @@ curl -X PUT \
 
 #### Create and write to `payment_db.raw_transaction_flagged_t`
 
-This table captures the output of the Flink SQL flagging pipeline from section 07. It includes the `is_flagged` and `flagged_reason` columns that let analysts query only suspicious transactions.
+This table captures the output of the Flink SQL flagging pipeline from section 08. It includes the `is_flagged` and `flagged_reason` columns that let analysts query only suspicious transactions.
 
 First let's create the Iceberg table using Spark SQL:
 
@@ -1646,7 +1646,7 @@ The `pub.cus.cardHolder.state.v1` topic carries nested Avro events with the full
 
 #### Create and write to `customer_db.raw_card_holder_t`
 
-The cardholder Avro schema uses nested structs and arrays. The Iceberg table is defined with a matching nested `STRUCT` column so the full hierarchy is preserved. In section 13, this raw table will be normalized into flat, joinable tables.
+The cardholder Avro schema uses nested structs and arrays. The Iceberg table is defined with a matching nested `STRUCT` column so the full hierarchy is preserved. In section 14, this raw table will be normalized into flat, joinable tables.
 
 First create the table using Spark SQL:
 
@@ -1722,9 +1722,9 @@ curl -X PUT \
 	}'
 ```
 
-## 11 - Validate the ingest by querying the Iceberg table using Spark SQL
+## 12 - Validate the ingest by querying the Iceberg table using Spark SQL
 
-**Goal:** Confirm that the Kafka Connect Iceberg sink connectors registered in section 10 are working correctly by querying the Iceberg tables and verifying that data has arrived.
+**Goal:** Confirm that the Kafka Connect Iceberg sink connectors registered in section 11 are working correctly by querying the Iceberg tables and verifying that data has arrived.
 
 Once the Kafka Connect connectors are running, verify that data is arriving in the Iceberg tables. Use either the Spark SQL CLI or the Jupyter notebook at <http://dataplatform:28888>.
 
@@ -1810,7 +1810,7 @@ spark = (
 %sql spark
 ```
 
-Inspect the schema of the transaction table to confirm it matches what was defined in section 10:
+Inspect the schema of the transaction table to confirm it matches what was defined in section 11:
 
 ```sql
 %%sql
@@ -1833,7 +1833,7 @@ SELECT * FROM payment_db.raw_transaction_flagged_t;
 
 > **What you should see:** Rows in both tables. The `raw_transaction_flagged_t` table should include `is_flagged` and `flagged_reason` columns. Rows with `is_flagged = 1` confirm that the end-to-end pipeline — from ShadowTraffic through Kafka, Flink SQL, and Kafka Connect — is working.
 
-## 12 - Using Spark to curate Transaction data
+## 13 - Using Spark to curate Transaction data
 
 **Goal:** Join the raw transaction and merchant Iceberg tables to produce a curated, denormalized table that is ready for reporting without any further joins. This is the "silver layer" in a typical lakehouse architecture.
 
@@ -2026,9 +2026,9 @@ show tables in payment_db
 
 > **What you should see:** Three tables listed: `raw_transaction_t`, `cur_transaction_with_merchant_sql_t`, and `cur_transaction_with_merchant_t`. The curated tables should contain the same data — both approaches produce equivalent results.
 
-## 13 - Curation Card Holder Data
+## 14 - Curation Card Holder Data
 
-**Goal:** Normalize the nested cardholder data from `customer_db.raw_card_holder_t` into flat, joinable Iceberg tables that can be queried efficiently by Trino (as used in section 14) and Spark.
+**Goal:** Normalize the nested cardholder data from `customer_db.raw_card_holder_t` into flat, joinable Iceberg tables that can be queried efficiently by Trino (as used in section 15) and Spark.
 
 The raw cardholder Iceberg table stores each cardholder event as a nested struct with arrays (addresses, usual_countries). This curation step normalizes the data into three flat relational tables suitable for SQL joins:
 
@@ -2223,9 +2223,9 @@ WHEN NOT MATCHED THEN INSERT *
 """)
 ```
 
-> **What just happened?** Spark read the raw nested Iceberg table and used three `MERGE INTO` statements to upsert data into the three flat curated tables. The `cur_card_t` table is especially important because it links `card_number` (used in transactions) to `person_id` (used in `cur_person_t`) — enabling the full transaction-to-person join that was demonstrated in section 14.
+> **What just happened?** Spark read the raw nested Iceberg table and used three `MERGE INTO` statements to upsert data into the three flat curated tables. The `cur_card_t` table is especially important because it links `card_number` (used in transactions) to `person_id` (used in `cur_person_t`) — enabling the full transaction-to-person join that was demonstrated in section 15.
 
-## 14 - Using Trino to query and curate
+## 15 - Using Trino to query and curate
 
 **Goal:** Use Trino's federated query engine to join Iceberg tables on object storage with live PostgreSQL data in a single SQL statement, and understand when this is preferable to waiting for Spark curation jobs to run.
 
@@ -2256,9 +2256,9 @@ LEFT JOIN iceberg_hive_rest.refdata_db.raw_merchant_t m
        ON t.merchant_id = m.merchant_id;
 ```
 
-> **What you should see:** Enriched transaction rows with merchant details, identical to the output from the Spark curation job in section 12 — but computed on demand without needing to pre-write a curated table.
+> **What you should see:** Enriched transaction rows with merchant details, identical to the output from the Spark curation job in section 13 — but computed on demand without needing to pre-write a curated table.
 
-Now join with the cardholder tables to add cardholder identity to each transaction. Two options are shown: using the curated Iceberg cardholder tables (populated in section 13) or querying directly from the live PostgreSQL source:
+Now join with the cardholder tables to add cardholder identity to each transaction. Two options are shown: using the curated Iceberg cardholder tables (populated in section 14) or querying directly from the live PostgreSQL source:
 
 ```sql
 SELECT t.transaction_id,
@@ -2283,7 +2283,7 @@ LEFT JOIN iceberg_hive_rest.customer_db.cur_person_t p
  		ON c.person_id = p.person_id;
 ```
 
-Alternatively, query directly from the PostgreSQL source system — useful before the cardholder curation pipeline (section 13) has run:
+Alternatively, query directly from the PostgreSQL source system — useful before the cardholder curation pipeline (section 14) has run:
 
 ```sql
 SELECT t.transaction_id,
