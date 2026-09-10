@@ -163,13 +163,43 @@ This will begin populating `priv.pay.transaction.delta.v1` topic with synthetic 
 
 **Goal:** Confirm that the synthetic transaction stream is flowing through Kafka and learn how to inspect it using command-line tools and the AKHQ UI.
 
-Credit Card Transaction arrive as a real-time data stream / events. We can easily view the stream by using the following command:
+Credit card transactions arrive as a real-time data stream on the `priv.pay.transaction.delta.v1` Kafka topic. Start by consuming the topic without any schema decoding to see what Kafka actually stores on the wire:
+
+```bash
+kcat -b dataplatform -t priv.pay.transaction.delta.v1 -q
+```
+
+> **What you should see:** Garbled binary output — the messages are Avro-encoded, so the raw bytes are not human-readable. This is expected: Kafka stores the bytes exactly as the producer wrote them.
+
+The messages are serialized using [Apache Avro](https://avro.apache.org/) and their schema is registered in the Confluent Schema Registry. Tell kcat about the registry so it can look up the schema and decode the bytes into readable JSON:
 
 ```bash
 kcat -b dataplatform -t priv.pay.transaction.delta.v1 -q -r http://dataplatform:8081 -s value=avro
 ```
 
-> **What you should see:** A continuous stream of Avro-decoded transaction records, one per line, flowing to the terminal. Each record contains fields like `transaction_id`, `card_number`, `amount`, `merchant_id`, `channel`, and `transaction_date`. Press `Ctrl+C` to stop consuming. If nothing appears, confirm that the ShadowTraffic simulator from section 00 is still running.
+> **What you should see:** A continuous stream of JSON-formatted transaction records, one per line. Each record contains fields like `transaction_id`, `card_number`, `amount`, `merchant_id`, `channel`, and `transaction_date`. Press `Ctrl+C` to stop consuming. If nothing appears, confirm that the ShadowTraffic simulator from section 00 is still running.
+
+### Viewing Message key
+
+Every Kafka message has two parts: a **key** and a **value**. The value is the transaction payload shown above. The key is used by Kafka to determine which partition a message lands in — all messages with the same key go to the same partition, guaranteeing ordering per key. For this topic the key is the `card_number`, which means all transactions for a given card are always processed in order.
+
+To display both key and value together, add `-f '%k: %s\n'` to the kcat command:
+
+```bash
+kcat -b dataplatform -t priv.pay.transaction.delta.v1 -r http://dataplatform:8081 -s key=avro -s value=avro -f '%k: %s\n' -q
+```
+
+and you will see output similar to:
+
+```
+"2221-4631-1180-3235": {"transaction_id": "bf46dbfc-42d6-d9c9-c904-1dccb09eaaef", "card_number": "2221-4631-1180-3235", "merchant_id": ...}
+"6759-1651-9876-6802": {"transaction_id": "b0477338-7c0f-583f-5f56-5fa6112cc644", "card_number": "6759-1651-9876-6802", "merchant_id": ...}
+"6304-2520-5675-3358": {"transaction_id": "3bc2911c-ef0e-13ff-9ffe-3a50b09a9a66", "card_number": "6304-2520-5675-3358", "merchant_id": ...}
+```
+
+> The key is shown before the colon, the value after it. Both are Avro-encoded and decoded by kcat using the Schema Registry.
+
+### Using AKHQ to browse Kafka in a Web browser
 
 Navigate to AKHQ: <http://dataplatform:28107> to view the `priv.pay.transaction.delta.v1` topic.
 
