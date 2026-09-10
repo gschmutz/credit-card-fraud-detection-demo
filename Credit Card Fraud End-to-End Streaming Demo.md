@@ -16,7 +16,8 @@ The platform for this demo has been created using the [Platys - Platform in a bo
 
 - [Prerequisites](#prerequisites)
 - [00 - Starting the Platform](#00---starting-the-platform)
-- [01 - Viewing Credit Card Transaction Stream](#01---viewing-credit-card-transaction-stream)
+- [01 - Simulating Transaction data traffic](#01---simulating-transaction-data-traffic)
+- [02 - Viewing Credit Card Transaction Stream](#02---viewing-credit-card-transaction-stream)
 - [03 - Merchant Data](#03---merchant-data)
 - [04 - CardHolder Application (OLTP)](#04---cardholder-application-oltp)
 - [05 - Stream Enabling the CardHolder Application](#05---stream-enabling-the-cardholder-application)
@@ -158,7 +159,7 @@ This will begin populating `priv.pay.transaction.delta.v1` topic with synthetic 
 
 > **What just happened?** ShadowTraffic reads the generator config in `scripts/shadowtraffic/card-fraud.json` and continuously produces realistic synthetic credit card transactions and merchant records to Kafka. Transactions include randomized card numbers, amounts, merchant IDs, channels, and dates. Merchant records include names, categories, cities, and countries.
 
-## 03 - Viewing Credit Card Transaction Stream
+## 02 - Viewing Credit Card Transaction Stream
 
 **Goal:** Confirm that the synthetic transaction stream is flowing through Kafka and learn how to inspect it using command-line tools and the AKHQ UI.
 
