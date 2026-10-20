@@ -400,4 +400,4 @@ Click on *+ Create Catalog** and fill out the following fields
 Click twice on **+ Add Property** and add
 
 * **scope**: `PRINCIPAL_ROLE:ALL`
-* **secret**: `admin:abc123!` 
+* **credential**: `admin:abc123!` 

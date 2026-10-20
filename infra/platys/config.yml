@@ -162,7 +162,7 @@
       #
       # ===== Confluent ksqlDB ========
       #
-      KSQLDB_enable: true
+      KSQLDB_enable: false
       # either 'cp' or 'oss'
       KSQLDB_edition: 'cp'
       KSQLDB_nodes: 1
@@ -527,7 +527,7 @@
       #
       # ===== Apache Spark ========
       #
-      SPARK_enable: false
+      SPARK_enable: true
       # either 3.3 or 3.4 or 3.5
       SPARK_base_version: 3.5
       # "hive" or "in-memory"
