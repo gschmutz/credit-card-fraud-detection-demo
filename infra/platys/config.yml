@@ -503,22 +503,22 @@
       #
       # ===== ShadowTraffic ========
       #      
-      SHADOW_TRAFFIC_enable: true
-      SHADOW_TRAFFIC_compose_profile: test
-      SHADOW_TRAFFIC_config_file: card-fraud.json
-      SHADOW_TRAFFIC_watch_config_file_change: true
+      SHADOWTRAFFIC_enable: true
+      SHADOWTRAFFIC_compose_profile: test
+      SHADOWTRAFFIC_config_file: card-fraud.json
+      SHADOWTRAFFIC_watch_config_file_change: true
       # either 'completion' or 'immediate'
-      SHADOW_TRAFFIC_reload_policy: completion
-      SHADOW_TRAFFIC_sample_size:
-      SHADOW_TRAFFIC_seed_value: 757928231
-      SHADOW_TRAFFIC_to_stdout: false      
-      SHADOW_TRAFFIC_with_studio: false
-      SHADOW_TRAFFIC_license_id: dbbcf90d-fc9f-40b2-bcc3-48e615dea580
-      SHADOW_TRAFFIC_license_email: michael+examples@shadowtraffic.io
-      SHADOW_TRAFFIC_licence_organization: ShadowTraffic
-      SHADOW_TRAFFIC_license_edition: ShadowTraffic Free Trial
-      SHADOW_TRAFFIC_license_expiration: '2026-02-26'
-      SHADOW_TRAFFIC_license_signature: hWB97kIcve1gyMtks/QoiQu0B/EILqfPj+qBh2JuSbVO3vKOLJuPljVGstx9Gb8ay7CGdGwoPWYIOkgsWw1fh0xYROtGRWYeQu40n4EZ+wC8JzXXrOxFyRZGB1yWIiJwkX/5/AGvN3BOtkbFukzuJKyIh4fJp82HgbR/B7JcwM+Ht7RSL9YqWbT3YTr8IRhzlDSyllw5d94v9s0G2ALVk+/nwsFpubQKUHSmChUUtkhrnX71Nt/Yvynu5JYw3ntK8I6GutQpIoi6y7dvvziFAxtovcLppY3hBsAgW/tw+PAm1JAgte+n4Rf6vVOYDArFWhqT1YfbOsJCbidHjEHMAg==
+      SHADOWTRAFFIC_reload_policy: completion
+      SHADOWTRAFFIC_sample_size:
+      SHADOWTRAFFIC_seed_value: 757928231
+      SHADOWTRAFFIC_to_stdout: false      
+      SHADOWTRAFFIC_with_studio: false
+      SHADOWTRAFFIC_license_id: dbbcf90d-fc9f-40b2-bcc3-48e615dea580
+      SHADOWTRAFFIC_license_email: michael+examples@shadowtraffic.io
+      SHADOWTRAFFIC_licence_organization: ShadowTraffic
+      SHADOWTRAFFIC_license_edition: ShadowTraffic Free Trial
+      SHADOWTRAFFIC_license_expiration: '2026-02-26'
+      SHADOWTRAFFIC_license_signature: hWB97kIcve1gyMtks/QoiQu0B/EILqfPj+qBh2JuSbVO3vKOLJuPljVGstx9Gb8ay7CGdGwoPWYIOkgsWw1fh0xYROtGRWYeQu40n4EZ+wC8JzXXrOxFyRZGB1yWIiJwkX/5/AGvN3BOtkbFukzuJKyIh4fJp82HgbR/B7JcwM+Ht7RSL9YqWbT3YTr8IRhzlDSyllw5d94v9s0G2ALVk+/nwsFpubQKUHSmChUUtkhrnX71Nt/Yvynu5JYw3ntK8I6GutQpIoi6y7dvvziFAxtovcLppY3hBsAgW/tw+PAm1JAgte+n4Rf6vVOYDArFWhqT1YfbOsJCbidHjEHMAg==
       #
       # ===== Apache Hadoop ========
       #
